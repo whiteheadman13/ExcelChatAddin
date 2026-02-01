@@ -35,6 +35,63 @@ namespace ExcelChatAddin
             _elementHost.Child = _chatView;
             this.Controls.Add(_elementHost);
         }
+        public string GetRangeText(string sheetName, string addressA1)
+        {
+            try
+            {
+                if (_excelApp == null) return "";
+
+                var wb = _excelApp.ActiveWorkbook;
+                if (wb == null) return "";
+
+                var ws = wb.Worksheets.Item[sheetName] as Excel.Worksheet;
+                if (ws == null) return "";
+
+                var range = ws.Range[addressA1];
+                return RangeToPlainText(range);
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        // TSVだと“タブが太い”問題があるので、表示用は " | " 区切りにする（見やすい）
+        private string RangeToPlainText(Excel.Range range)
+        {
+            object v = range.Value2;
+
+            if (!(v is object[,]))
+                return SanitizeCell(v);
+
+            var arr = (object[,])v;
+            int rowCount = arr.GetLength(0);
+            int colCount = arr.GetLength(1);
+
+            var sb = new System.Text.StringBuilder();
+
+            for (int r = 1; r <= rowCount; r++)
+            {
+                for (int c = 1; c <= colCount; c++)
+                {
+                    if (c > 1) sb.Append(" | ");
+                    sb.Append(SanitizeCell(arr[r, c]));
+                }
+                if (r < rowCount) sb.AppendLine();
+            }
+
+            return sb.ToString();
+        }
+
+        private string SanitizeCell(object value)
+        {
+            string s = value?.ToString() ?? "";
+            return s.Replace("\r\n", " ")
+                    .Replace("\n", " ")
+                    .Replace("\r", " ")
+                    .Replace("\t", " ");
+        }
+
 
         public void SetApplication(object application)
         {
