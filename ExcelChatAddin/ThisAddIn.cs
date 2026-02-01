@@ -1,47 +1,38 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Xml.Linq;
+using System.Windows.Forms;
 using Excel = Microsoft.Office.Interop.Excel;
 using Office = Microsoft.Office.Core;
-using System.Windows.Forms;
-using Microsoft.Office.Tools.Excel;
-
 
 namespace ExcelChatAddin
 {
     public partial class ThisAddIn
     {
-        private Microsoft.Office.Tools.CustomTaskPane _myTaskPane;
-        private TaskPaneHost _taskPaneHost;
+        private readonly Dictionary<int, Microsoft.Office.Tools.CustomTaskPane> _panesByHwnd
+            = new Dictionary<int, Microsoft.Office.Tools.CustomTaskPane>();
 
+        private readonly Dictionary<int, TaskPaneHost> _hostsByHwnd
+            = new Dictionary<int, TaskPaneHost>();
+
+        private Office.CommandBarButton _sendBtn;
         private const string MENU_TAG = "OfficeChat_SendSelectionToChat";
 
-        private void ThisAddIn_Startup(object sender, System.EventArgs e)
+        private void ThisAddIn_Startup(object sender, EventArgs e)
         {
             AddCellContextMenu();
             this.Application.WorkbookBeforeClose += Application_WorkbookBeforeClose;
-
-            // ▼ PowerPointと同じ：右側タスクペイン
-            _taskPaneHost = new TaskPaneHost();
-            _taskPaneHost.SetApplication(this.Application);
-
-            _myTaskPane = this.CustomTaskPanes.Add(_taskPaneHost, "Secure Chat");
-            _myTaskPane.Width = 400;
-            _myTaskPane.Visible = false;
         }
 
-
-        private void ThisAddIn_Shutdown(object sender, System.EventArgs e)
+        private void ThisAddIn_Shutdown(object sender, EventArgs e)
         {
+            try { if (_sendBtn != null) _sendBtn.Click -= Btn_Click; } catch { }
+
             RemoveCellContextMenu();
             this.Application.WorkbookBeforeClose -= Application_WorkbookBeforeClose;
         }
 
         private void Application_WorkbookBeforeClose(Excel.Workbook wb, ref bool cancel)
         {
-            // 事故防止：残留しやすいのでここでも削除
             RemoveCellContextMenu();
         }
 
@@ -50,20 +41,22 @@ namespace ExcelChatAddin
             try
             {
                 var cellBar = this.Application.CommandBars["Cell"];
-                RemoveCellContextMenu(); // 二重追加防止
+                RemoveCellContextMenu();
 
-                var btn = (Office.CommandBarButton)cellBar.Controls.Add(
+                _sendBtn = (Office.CommandBarButton)cellBar.Controls.Add(
                     Type: Office.MsoControlType.msoControlButton,
                     Temporary: true);
 
-                btn.Caption = "選択範囲をチャットへ転送";
-                btn.Tag = MENU_TAG;
-                btn.Visible = true;
-                btn.Click += Btn_Click;
+                _sendBtn.Caption = "選択範囲をチャットへ転送";
+                _sendBtn.Tag = MENU_TAG;
+                _sendBtn.Visible = true;
+
+                _sendBtn.Click -= Btn_Click;
+                _sendBtn.Click += Btn_Click;
             }
-            catch
+            catch (Exception ex)
             {
-                // 必要ならログ
+                MessageBox.Show(ex.ToString(), "ExcelChatAddin(AddCellContextMenu)");
             }
         }
 
@@ -81,10 +74,7 @@ namespace ExcelChatAddin
                     }
                 }
             }
-            catch
-            {
-                // 無視でOK
-            }
+            catch { }
         }
 
         private void Btn_Click(Office.CommandBarButton Ctrl, ref bool CancelDefault)
@@ -94,81 +84,77 @@ namespace ExcelChatAddin
                 var sel = this.Application.Selection as Excel.Range;
                 if (sel == null) return;
 
-                string tsv = RangeToTsv(sel);
-                System.Windows.Forms.Clipboard.SetText(tsv);
-                ShowChat(tsv);
+                var ws = sel.Worksheet as Excel.Worksheet;
+                string sheetName = ws?.Name ?? "";
+                string addressA1 = sel.Address[false, false, Excel.XlReferenceStyle.xlA1];
 
+                // トークン生成（PowerPointの @slide と同じノリ）
+                string token = $"@range({sheetName},{addressA1}) ";
+
+                // ペイン表示
+                ShowChat();
+
+                // 入力欄に追記
+                AppendRangeTokenToInput(token);
             }
             catch (Exception ex)
             {
-                System.Windows.Forms.MessageBox.Show(ex.Message, "ExcelChatAddin");
-            }
-        }
-        public void ShowChat(string text = "")
-        {
-            if (_myTaskPane == null) return;
-
-            _myTaskPane.Visible = true;
-
-            if (!string.IsNullOrEmpty(text) && _taskPaneHost != null)
-            {
-                _taskPaneHost.PassTextToChat(text);
+                MessageBox.Show(ex.ToString(), "ExcelChatAddin(Btn_Click)");
             }
         }
 
-
-        private string RangeToTsv(Excel.Range range)
+        public void ShowChat()
         {
-            object v = range.Value2;
-
-            // 単一セル
-            if (!(v is object[,]))
+            try
             {
-                return SanitizeCell(v);
-            }
-
-            // 複数セル
-            var arr = (object[,])v;
-            int rowCount = arr.GetLength(0);
-            int colCount = arr.GetLength(1);
-
-            var sb = new StringBuilder();
-
-            for (int r = 1; r <= rowCount; r++)
-            {
-                for (int c = 1; c <= colCount; c++)
+                var win = this.Application.ActiveWindow;
+                if (win == null)
                 {
-                    if (c > 1) sb.Append('\t');
-                    sb.Append(SanitizeCell(arr[r, c]));
+                    MessageBox.Show("ActiveWindow is null", "ExcelChatAddin");
+                    return;
                 }
-                if (r < rowCount) sb.AppendLine();
+
+                int hwnd = win.Hwnd;
+
+                if (!_panesByHwnd.TryGetValue(hwnd, out var pane) || pane == null)
+                {
+                    var host = new TaskPaneHost();
+                    host.SetApplication(this.Application);
+
+                    pane = this.CustomTaskPanes.Add(host, "Secure Chat", win);
+                    pane.Width = 400;
+
+                    _panesByHwnd[hwnd] = pane;
+                    _hostsByHwnd[hwnd] = host;
+                }
+
+                pane.Visible = true;
             }
-
-            return sb.ToString();
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "ExcelChatAddin(ShowChat)");
+            }
         }
 
-        private string SanitizeCell(object value)
+        private void AppendRangeTokenToInput(string token)
         {
-            string s = value?.ToString() ?? "";
-            return s.Replace("\r\n", " ")
-                    .Replace("\n", " ")
-                    .Replace("\r", " ")
-                    .Replace("\t", " ");
+            var win = this.Application.ActiveWindow;
+            if (win == null) return;
+
+            int hwnd = win.Hwnd;
+
+            if (_hostsByHwnd.TryGetValue(hwnd, out var host) && host != null)
+            {
+                host.AppendToInput(token);
+            }
         }
 
-
-        #region VSTO で生成されたコード
-
-        /// <summary>
-        /// デザイナーのサポートに必要なメソッドです。
-        /// コード エディターで変更しないでください。
-        /// </summary>
+        #region VSTO generated code
         private void InternalStartup()
         {
-            this.Startup += new System.EventHandler(ThisAddIn_Startup);
-            this.Shutdown += new System.EventHandler(ThisAddIn_Shutdown);
+            this.Startup += new EventHandler(ThisAddIn_Startup);
+            this.Shutdown += new EventHandler(ThisAddIn_Shutdown);
         }
-
         #endregion
     }
 }
