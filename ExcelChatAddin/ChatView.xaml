@@ -52,14 +52,23 @@
         <!-- 入力欄（編集専用） -->
         <!-- ============================= -->
         <TextBox x:Name="InputBox"
-                 Grid.Row="3"
-                 AcceptsReturn="True"
-                 TextWrapping="Wrap"
-                 VerticalScrollBarVisibility="Auto"
-                 BorderThickness="1"
-                 Padding="8"
-                 FontSize="16"
-                 TextChanged="InputBox_TextChanged"/>
+         Grid.Row="3"
+         AcceptsReturn="True"
+         TextWrapping="Wrap"
+         VerticalScrollBarVisibility="Auto"
+         BorderThickness="1"
+         Padding="8"
+         FontSize="16"
+         TextChanged="InputBox_TextChanged">
+
+            <TextBox.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="選択文字列をマスキング登録" Click="MenuRegisterMask_Click"/>
+                </ContextMenu>
+            </TextBox.ContextMenu>
+
+        </TextBox>
+
     </Grid>
 
 </UserControl>

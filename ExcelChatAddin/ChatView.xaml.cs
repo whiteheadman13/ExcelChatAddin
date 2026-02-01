@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data.SqlTypes;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -106,7 +107,8 @@ namespace ExcelChatAddin
                 string expanded = ExpandRangesAppendAtEnd(raw);
 
                 // 2) マスキング（暫定：後で PowerPoint の MaskingEngine に差し替え）
-                string masked = SimpleMask(expanded);
+                string masked = MaskingEngine.Instance.Mask(expanded);
+
 
                 // 3) ダイアログ表示
                 var win = new MaskPreviewWindow(masked);
@@ -179,6 +181,72 @@ namespace ExcelChatAddin
                 "__PHONE__");
 
             return text;
+        }
+        private void MenuRegisterMask_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (InputBox == null) return;
+
+                var selected = InputBox.SelectedText?.Trim();
+                if (string.IsNullOrWhiteSpace(selected))
+                {
+                    MessageBox.Show("入力欄でマスキングしたい文字列を選択してから実行してください。", "マスキング登録");
+                    return;
+                }
+
+                // Excelの前面にダイアログを出す（Owner付き）
+                System.Windows.Forms.IWin32Window owner = null;
+                if (_host != null && _host.ExcelHwnd != IntPtr.Zero)
+                    owner = new Win32Window(_host.ExcelHwnd);
+
+                using (var dlg = new RegisterDialog(selected))
+                {
+                    var result = owner != null ? dlg.ShowDialog(owner) : dlg.ShowDialog();
+                    if (result != System.Windows.Forms.DialogResult.OK) return;
+
+                    // RegisterDialog の結果に応じて辞書へ登録
+                    string placeholder;
+
+                    if (dlg.IsNewCategory)
+                    {
+                        MaskingEngine.Instance.AddRule(selected, dlg.SelectedCategory);
+
+                        // 追加されたプレースホルダを取り出す
+                        var rules = MaskingEngine.Instance.GetAllRules();
+                        if (!rules.TryGetValue(selected, out placeholder) || string.IsNullOrWhiteSpace(placeholder))
+                        {
+                            MessageBox.Show("登録に失敗しました（プレースホルダ取得不可）。", "マスキング登録");
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        // 既存タグに紐付け（表記揺れ登録）
+                        placeholder = dlg.SelectedPlaceholder;
+                        if (string.IsNullOrWhiteSpace(placeholder))
+                        {
+                            MessageBox.Show("既存タグが選択されていません。", "マスキング登録");
+                            return;
+                        }
+
+                        MaskingEngine.Instance.AddRuleWithPlaceholder(selected, placeholder);
+                    }
+
+                    // 選択文字列をプレースホルダに置換
+                    int start = InputBox.SelectionStart;
+                    InputBox.SelectedText = placeholder;
+                    InputBox.SelectionStart = start + placeholder.Length;
+                    InputBox.SelectionLength = 0;
+
+                    RenderPreview();
+                    FocusInput();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "マスキング登録");
+            }
         }
 
         // ----------------------------

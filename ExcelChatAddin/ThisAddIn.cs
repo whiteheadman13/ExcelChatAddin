@@ -14,28 +14,441 @@ namespace ExcelChatAddin
         private readonly Dictionary<int, TaskPaneHost> _hostsByHwnd
             = new Dictionary<int, TaskPaneHost>();
 
+        // 既存：チャットへ転送
         private Office.CommandBarButton _sendBtn;
         private const string MENU_TAG = "OfficeChat_SendSelectionToChat";
+        private bool _maskRegisterDialogOpen = false;
+
+        private bool _menusInitialized = false;
+        private DateTime _lastRegisterClick = DateTime.MinValue;
+        private DateTime _lastManageClick = DateTime.MinValue;
+        private bool _registerDialogOpen = false;
+        private bool _manageDialogOpen = false;
+        private int _inManageClick = 0;
+        private int _inRegisterClick = 0;
+
+
+
+        // 追加：マスキング関連（右クリックに追加するメニュー）
+        private const string MaskMenuTagRegister = "ExcelChatAddin.Mask.Register";
+        private const string MaskMenuTagManage = "ExcelChatAddin.Mask.Manage";
+
 
         private void ThisAddIn_Startup(object sender, EventArgs e)
         {
-            AddCellContextMenu();
+            AddCellContextMenu(); // 既存：チャット転送
+
+            PurgeMaskMenus();     // 全掃除
+
+            AddMaskManageMenu();  // ★通常モード専用
+            AddMaskRegisterMenus(); // ★編集モード専用
+
             this.Application.WorkbookBeforeClose += Application_WorkbookBeforeClose;
         }
-
-        private void ThisAddIn_Shutdown(object sender, EventArgs e)
+        private void AddMaskManageMenu()
         {
-            try { if (_sendBtn != null) _sendBtn.Click -= Btn_Click; } catch { }
+            try
+            {
+                var cb = this.Application.CommandBars["Cell"];
+                if (cb == null) return;
 
-            RemoveCellContextMenu();
-            this.Application.WorkbookBeforeClose -= Application_WorkbookBeforeClose;
+                RemoveCommandBarControl(cb, MaskMenuTagManage);
+
+                var btnMng = (Office.CommandBarButton)cb.Controls.Add(
+                    Office.MsoControlType.msoControlButton, Temporary: true);
+
+                btnMng.Caption = "辞書管理…";
+                btnMng.Tag = MaskMenuTagManage;
+                btnMng.Click += BtnMng_Click;
+            }
+            catch { }
+        }
+        private void AddMaskRegisterMenus()
+        {
+            // 編集モードでも最悪 Cell が出る環境があるので、Cellにも出す
+            TryAddRegisterToBar("Cell");
+
+            // 編集モード候補も1つだけ（優先順）
+            TryAddRegisterToFirstExistingBar(new[] { "Text", "Edit", "Formula Bar" });
+        }
+        private void TryAddRegisterToBar(string barName)
+        {
+            try
+            {
+                var cb = this.Application.CommandBars[barName];
+                if (cb == null) return;
+
+                RemoveCommandBarControl(cb, MaskMenuTagRegister);
+
+                var btnReg = (Office.CommandBarButton)cb.Controls.Add(
+                    Office.MsoControlType.msoControlButton, Temporary: true);
+                btnReg.Caption = "選択文字列をマスキング登録…";
+                btnReg.Tag = MaskMenuTagRegister;
+                btnReg.Click += BtnReg_Click;
+            }
+            catch { }
+        }
+
+        private void TryAddRegisterToFirstExistingBar(string[] bars)
+        {
+            foreach (var name in bars)
+            {
+                try
+                {
+                    var cb = this.Application.CommandBars[name];
+                    if (cb == null) continue;
+
+                    RemoveCommandBarControl(cb, MaskMenuTagRegister);
+
+                    var btnReg = (Office.CommandBarButton)cb.Controls.Add(
+                        Office.MsoControlType.msoControlButton, Temporary: true);
+                    btnReg.Caption = "選択文字列をマスキング登録…";
+                    btnReg.Tag = MaskMenuTagRegister;
+                    btnReg.Click += BtnReg_Click;
+
+                    break; // 1つだけ
+                }
+                catch { }
+            }
+        }
+
+
+        private void PurgeMaskMenus()
+        {
+            string[] bars = { "Cell", "Text", "Edit", "Formula Bar" };
+
+            foreach (var name in bars)
+            {
+                try
+                {
+                    var cb = this.Application.CommandBars[name];
+                    if (cb == null) continue;
+
+                    RemoveCommandBarControl(cb, MaskMenuTagRegister);
+                    RemoveCommandBarControl(cb, MaskMenuTagManage);
+                }
+                catch { }
+            }
+        }
+
+
+
+        private void EnsureMaskMenus()
+        {
+            if (_menusInitialized) return;
+            _menusInitialized = true;
+
+            // ★これだけにする（最重要）
+            TryAddMaskMenusToBar("Cell");
+        }
+        private void TryAddMaskMenusToBar(string commandBarName)
+        {
+            try
+            {
+                var cb = this.Application.CommandBars[commandBarName];
+                if (cb == null) return;
+
+                // 同Tagを全削除（複数残っていても全消し）
+                RemoveCommandBarControl(cb, MaskMenuTagRegister);
+                RemoveCommandBarControl(cb, MaskMenuTagManage);
+
+                // Register
+                var btnReg = (Office.CommandBarButton)cb.Controls.Add(
+                    Office.MsoControlType.msoControlButton, Temporary: true);
+                btnReg.Caption = "選択文字列をマスキング登録…";
+                btnReg.Tag = MaskMenuTagRegister;
+                btnReg.Click += BtnReg_Click;
+
+                // Manage
+                var btnMng = (Office.CommandBarButton)cb.Controls.Add(
+                    Office.MsoControlType.msoControlButton, Temporary: true);
+                btnMng.Caption = "辞書管理…";
+                btnMng.Tag = MaskMenuTagManage;
+                btnMng.Click += BtnMng_Click;
+            }
+            catch { }
+        }
+        private void CleanupMaskMenus()
+        {
+            string[] bars = { "Cell", "Text", "Edit", "Formula Bar" };
+            foreach (var name in bars)
+            {
+                try
+                {
+                    var cb = this.Application.CommandBars[name];
+                    if (cb == null) continue;
+                    RemoveCommandBarControl(cb, MaskMenuTagRegister);
+                    RemoveCommandBarControl(cb, MaskMenuTagManage);
+                }
+                catch { }
+            }
         }
 
         private void Application_WorkbookBeforeClose(Excel.Workbook wb, ref bool cancel)
         {
-            RemoveCellContextMenu();
+            try { RemoveCellContextMenu(); } catch { }
+
+            try { CleanupMaskMenus(); } catch { }
         }
 
+
+
+        private void ThisAddIn_Shutdown(object sender, EventArgs e)
+        {
+            try
+            {
+                if (_sendBtn != null) _sendBtn.Click -= Btn_Click;
+            }
+            catch { }
+
+            RemoveCellContextMenu();
+
+            try
+            {
+                //this.Application.SheetBeforeRightClick -= Application_SheetBeforeRightClick;
+                this.Application.WorkbookBeforeClose -= Application_WorkbookBeforeClose;
+            }
+            catch { }
+        }
+
+        
+
+        // =========================================================
+        // 右クリック時：メニューを差し込む（毎回）
+        // =========================================================
+        private void Application_SheetBeforeRightClick(object Sh, Excel.Range Target, ref bool Cancel)
+        {
+            //try
+            //{
+            //    // セルの右クリックメニュー
+            //    Office.CommandBar cb = this.Application.CommandBars["Cell"];
+
+            //    // 既存の同Tagボタンを消す（重複防止）
+            //    RemoveCommandBarControl(cb, MaskMenuTagRegister);
+            //    RemoveCommandBarControl(cb, MaskMenuTagManage);
+
+            //    // ① 選択文字列をマスキング登録
+            //    var btnReg = (Office.CommandBarButton)cb.Controls.Add(
+            //        Office.MsoControlType.msoControlButton, Temporary: true);
+            //    btnReg.Caption = "選択文字列をマスキング登録…";
+            //    btnReg.Tag = MaskMenuTagRegister;
+            //    btnReg.Click += BtnReg_Click;
+
+            //    // ② 辞書管理
+            //    var btnMng = (Office.CommandBarButton)cb.Controls.Add(
+            //        Office.MsoControlType.msoControlButton, Temporary: true);
+            //    btnMng.Caption = "辞書管理…";
+            //    btnMng.Tag = MaskMenuTagManage;
+            //    btnMng.Click += BtnMng_Click;
+            //}
+            //catch
+            //{
+            //    // 右クリックメニューは環境差があるので握りつぶしでOK
+            //}
+        }
+
+        private static void RemoveCommandBarControl(Office.CommandBar cb, string tag)
+        {
+            try
+            {
+                for (int i = cb.Controls.Count; i >= 1; i--)
+                {
+                    var c = cb.Controls[i];
+                    if (c != null && string.Equals(c.Tag, tag, StringComparison.OrdinalIgnoreCase))
+                        c.Delete();
+                }
+            }
+            catch { }
+        }
+        private void DebugDumpActiveCommandBars()
+        {
+            try
+            {
+                System.Diagnostics.Debug.WriteLine("=== CommandBars dump (visible/enabled) ===");
+                foreach (Office.CommandBar cb in this.Application.CommandBars)
+                {
+                    try
+                    {
+                        // Visible/Enabled を持たないものもあるので try
+                        bool visible = false;
+                        bool enabled = false;
+                        try { visible = cb.Visible; } catch { }
+                        try { enabled = cb.Enabled; } catch { }
+
+                        if (visible || enabled)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Bar: {cb.Name}  Visible={visible} Enabled={enabled}");
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+        }
+
+        private DateTime _lastRegClick = DateTime.MinValue;
+        // =========================================================
+        // ① マスキング登録…
+        // =========================================================
+        private void BtnReg_Click(Office.CommandBarButton Ctrl, ref bool CancelDefault)
+        {
+            DebugDumpActiveCommandBars();
+            // ★同時発火（複数バー）を完全に止める
+            if (System.Threading.Interlocked.Exchange(ref _inRegisterClick, 1) == 1)
+                return;
+
+            // 1) 同一クリック多重発火を時間で弾く（ExcelのCOMイベント対策）
+            var now = DateTime.UtcNow;
+            if ((now - _lastRegisterClick).TotalMilliseconds < 800) return;
+            _lastRegisterClick = now;
+
+            // 2) ダイアログの多重表示を弾く
+            if (_registerDialogOpen) return;
+            _registerDialogOpen = true;
+
+            try
+            {
+                string selected = TryGetSelectedTextInEditMode();
+                if (string.IsNullOrWhiteSpace(selected))
+                {
+                    MessageBox.Show("セル編集モードで、登録したい文字列を選択してから実行してください。", "マスキング登録");
+                    return;
+                }
+
+                // ★既に登録済みチェック（メッセージはここで1回だけ）
+                var rules = MaskingEngine.Instance.GetAllRules();
+                if (rules != null && rules.TryGetValue(selected, out var ph))
+                {
+                    MessageBox.Show($"すでに登録済みです。\n\n対象: {selected}\n置換: {ph}", "マスキング登録");
+                    return;
+                }
+
+                var owner = new Win32Window(new IntPtr(this.Application.Hwnd));
+
+                using (var dlg = new RegisterDialog(selected))
+                {
+                    var r = dlg.ShowDialog(owner);
+                    if (r != DialogResult.OK) return;
+
+                    if (dlg.IsNewCategory)
+                        MaskingEngine.Instance.AddRule(selected, dlg.SelectedCategory);
+                    else
+                        MaskingEngine.Instance.AddRuleWithPlaceholder(selected, dlg.SelectedPlaceholder);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "マスキング登録");
+            }
+            finally
+            {
+                _registerDialogOpen = false;
+            }
+        }
+
+        private void BtnMng_Click(Office.CommandBarButton Ctrl, ref bool CancelDefault)
+        {
+            // ★完全排他（同時発火を物理的に止める）
+            if (System.Threading.Interlocked.Exchange(ref _inManageClick, 1) == 1)
+                return;
+
+            try
+            {
+                var owner = new Win32Window(new IntPtr(this.Application.Hwnd));
+                using (var dlg = new DictionaryManager())
+                {
+                    dlg.ShowDialog(owner);
+                }
+            }
+            finally
+            {
+                _inManageClick = 0;
+            }
+        }
+
+
+
+
+        private string TryGetSelectedTextInEditMode()
+        {
+            try
+            {
+                // クリップボード退避
+                string before = "";
+                try { before = Clipboard.ContainsText() ? Clipboard.GetText() : ""; } catch { }
+
+                // 変化検知しやすいように一旦クリア（空にできない環境もあるので try）
+                try { Clipboard.Clear(); } catch { }
+
+                // Excelに対して「コピー」を実行（SendKeysより安定）
+                try
+                {
+                    this.Application.CommandBars.ExecuteMso("Copy");
+                }
+                catch
+                {
+                    // ExecuteMso が効かない環境は最後の手として SendKeys
+                    SendKeys.SendWait("^c");
+                }
+
+                System.Threading.Thread.Sleep(80);
+
+                // コピー結果取得
+                string copied = "";
+                try { copied = Clipboard.ContainsText() ? Clipboard.GetText() : ""; } catch { }
+
+                // クリップボード復元（親切）
+                try { Clipboard.SetText(before); } catch { }
+
+                copied = (copied ?? "").Trim();
+
+                // 何も取れてない or 変化してないなら「選択が取れてない」扱い
+                if (string.IsNullOrWhiteSpace(copied)) return "";
+                if (string.Equals(copied, before, StringComparison.Ordinal)) return "";
+
+                // 「セル全体コピー」を弾きたい場合はここで比較（必要なら）
+                // var full = Convert.ToString((this.Application.ActiveCell as Excel.Range)?.Text) ?? "";
+                // if (!string.IsNullOrEmpty(full) && string.Equals(copied, full.Trim(), StringComparison.Ordinal)) return "";
+
+                return copied;
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+
+
+
+        // =========================================================
+        // ② 辞書管理…
+        // =========================================================
+        
+
+        // 選択セルのテキストを取得（複数なら左上セル）
+        private string GetSelectedCellText()
+        {
+            try
+            {
+                var sel = this.Application.Selection as Excel.Range;
+                if (sel == null) return "";
+
+                var cell = sel.Cells[1, 1] as Excel.Range;
+
+                // 表示文字（Text）優先。空なら Value2
+                string t = Convert.ToString(cell.Text);
+                if (!string.IsNullOrWhiteSpace(t)) return t.Trim();
+
+                var v = cell.Value2;
+                return v != null ? Convert.ToString(v).Trim() : "";
+            }
+            catch { return ""; }
+        }
+
+        // =========================================================
+        // 既存：セルメニューに「選択範囲をチャットへ転送」
+        // =========================================================
         private void AddCellContextMenu()
         {
             try
@@ -77,6 +490,7 @@ namespace ExcelChatAddin
             catch { }
         }
 
+        // 既存：@range トークン追加
         private void Btn_Click(Office.CommandBarButton Ctrl, ref bool CancelDefault)
         {
             try
@@ -88,7 +502,7 @@ namespace ExcelChatAddin
                 string sheetName = ws?.Name ?? "";
                 string addressA1 = sel.Address[false, false, Excel.XlReferenceStyle.xlA1];
 
-                // トークン生成（PowerPointの @slide と同じノリ）
+                // トークン生成
                 string token = $"@range({sheetName},{addressA1}) ";
 
                 // ペイン表示
@@ -149,6 +563,89 @@ namespace ExcelChatAddin
             }
         }
 
+        
+        //private void AddEditModeContextMenus()
+        //{
+        //    // Excelの編集モード右クリックは環境でバー名が揺れるので、候補全部に刺す
+        //    string[] candidates =
+        //    {
+        //        "Text",         // 多くの環境でこれ
+        //        "Edit",         // 環境によってこれ
+        //        "Formula Bar",  // 数式バー編集中
+        //        "Cell"          // 一部環境では編集でもCellが出る
+        //    };
+
+        //    foreach (var name in candidates)
+        //    {
+        //        TryAddMaskMenus(name);
+        //    }
+        //}
+
+        //private void TryAddMaskMenus(string commandBarName)
+        //{
+        //    try
+        //    {
+        //        var cb = this.Application.CommandBars[commandBarName];
+        //        if (cb == null) return;
+
+        //        // 重複防止
+        //        RemoveCommandBarControl(cb, MaskMenuTagRegister);
+        //        RemoveCommandBarControl(cb, MaskMenuTagManage);
+
+        //        // ① 選択文字列をマスキング登録
+        //        var btnReg = (Office.CommandBarButton)cb.Controls.Add(
+        //            Office.MsoControlType.msoControlButton, Temporary: true);
+        //        btnReg.Caption = "選択文字列をマスキング登録…";
+        //        btnReg.Tag = MaskMenuTagRegister;
+        //        btnReg.Click += BtnReg_Click;
+
+        //        // ② 辞書管理
+        //        var btnMng = (Office.CommandBarButton)cb.Controls.Add(
+        //            Office.MsoControlType.msoControlButton, Temporary: true);
+        //        btnMng.Caption = "辞書管理…";
+        //        btnMng.Tag = MaskMenuTagManage;
+        //        btnMng.Click += BtnMng_Click;
+        //    }
+        //    catch
+        //    {
+        //        // そのCommandBarが存在しない環境は普通にあるので無視でOK
+        //    }
+        //}
+
+        //private void AddTextEditContextMenu()
+        //{
+        //    string[] candidates = { "Text", "Edit", "Formula Bar" };
+
+        //    foreach (var name in candidates)
+        //    {
+        //        try
+        //        {
+        //            var cb = this.Application.CommandBars[name];
+        //            if (cb == null) continue;
+
+        //            RemoveCommandBarControl(cb, MaskMenuTagRegister);
+        //            RemoveCommandBarControl(cb, MaskMenuTagManage);
+
+        //            var btnReg = (Office.CommandBarButton)cb.Controls.Add(
+        //                Office.MsoControlType.msoControlButton, Temporary: true);
+        //            btnReg.Caption = "選択文字列をマスキング登録…";
+        //            btnReg.Tag = MaskMenuTagRegister;
+        //            btnReg.Click += BtnReg_Click;
+
+        //            var btnMng = (Office.CommandBarButton)cb.Controls.Add(
+        //                Office.MsoControlType.msoControlButton, Temporary: true);
+        //            btnMng.Caption = "辞書管理…";
+        //            btnMng.Tag = MaskMenuTagManage;
+        //            btnMng.Click += BtnMng_Click;
+        //        }
+        //        catch
+        //        {
+        //            // そのCommandBarが無い環境は普通にあるので無視でOK
+        //        }
+        //    }
+        //}
+
+
         #region VSTO generated code
         private void InternalStartup()
         {
@@ -156,5 +653,7 @@ namespace ExcelChatAddin
             this.Shutdown += new EventHandler(ThisAddIn_Shutdown);
         }
         #endregion
+
+
     }
 }

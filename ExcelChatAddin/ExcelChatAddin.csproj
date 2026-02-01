@@ -101,6 +101,9 @@
   -->
   <ItemGroup>
     <Reference Include="Accessibility" />
+    <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <HintPath>..\packages\Newtonsoft.Json.13.0.4\lib\net45\Newtonsoft.Json.dll</HintPath>
+    </Reference>
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="System" />
@@ -190,8 +193,16 @@
     can be found.
   -->
   <ItemGroup>
+    <Compile Include="DictionaryManager.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="MaskingEngine.cs" />
+    <Compile Include="Paths.cs" />
     <Compile Include="Properties\AssemblyInfo.cs">
       <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="RegisterDialog.cs">
+      <SubType>Form</SubType>
     </Compile>
     <Compile Include="TaskPaneHost.cs">
       <SubType>UserControl</SubType>
@@ -205,6 +216,7 @@
     <Compile Include="MaskPreviewWindow.xaml.cs">
       <DependentUpon>MaskPreviewWindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="Win32Window.cs" />
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
@@ -215,6 +227,7 @@
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
     <None Include="ExcelChatAddin_TemporaryKey.pfx" />
+    <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
       <LastGenOutput>Settings.Designer.cs</LastGenOutput>

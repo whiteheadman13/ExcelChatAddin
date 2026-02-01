@@ -16,6 +16,15 @@ namespace ExcelChatAddin
         private ElementHost _elementHost;
         private ChatView _chatView;
         private Excel.Application _excelApp;
+        public IntPtr ExcelHwnd
+        {
+            get
+            {
+                try { return _excelApp != null ? new IntPtr(_excelApp.Hwnd) : IntPtr.Zero; }
+                catch { return IntPtr.Zero; }
+            }
+        }
+
 
         public TaskPaneHost()
         {
