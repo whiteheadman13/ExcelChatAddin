@@ -109,6 +109,7 @@
     <Reference Include="System" />
     <Reference Include="System.Data" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.Net.Http" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xaml" />
     <Reference Include="System.Xml" />
@@ -193,8 +194,14 @@
     can be found.
   -->
   <ItemGroup>
+    <Compile Include="ChatModels.cs" />
     <Compile Include="DictionaryManager.cs">
       <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="GeminiClient.cs" />
+    <Compile Include="GeminiDtos.cs" />
+    <Compile Include="GeminiResponseWindow.xaml.cs">
+      <DependentUpon>GeminiResponseWindow.xaml</DependentUpon>
     </Compile>
     <Compile Include="HotKeyWindow.cs" />
     <Compile Include="MaskingEngine.cs" />
@@ -250,6 +257,10 @@
   </ItemGroup>
   <ItemGroup>
     <Page Include="ChatView.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="GeminiResponseWindow.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>

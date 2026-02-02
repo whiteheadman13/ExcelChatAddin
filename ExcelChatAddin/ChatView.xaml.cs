@@ -42,6 +42,36 @@ namespace ExcelChatAddin
                 RenderPreview();
             };
         }
+        private async void btnSendGemini_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var raw = InputBox.Text;
+                if (string.IsNullOrWhiteSpace(raw))
+                    return;
+
+                // 既存のマスキング辞書を適用（辞書は保存されるが、会話履歴は保存しない）
+                var masked = MaskingEngine.Instance.Mask(raw);
+
+                btnSendGemini.IsEnabled = false;
+
+                var client = new GeminiClient();
+                var response = await client.SendAsync(masked);
+
+                // 応答を表示して終わり（パワポ仕様）
+                var w = new GeminiResponseWindow(response);
+                w.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(ex.Message, "Gemini送信エラー");
+            }
+            finally
+            {
+                btnSendGemini.IsEnabled = true;
+            }
+        }
+
 
         public void SetHost(TaskPaneHost host) => _host = host;
 

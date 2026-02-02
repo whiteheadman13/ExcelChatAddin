@@ -27,6 +27,8 @@
                         Padding="10,4"
                         Click="BtnMaskPreview_Click"/>
             </StackPanel>
+            <Button x:Name="btnSendGemini" Content="Gemini送信" Click="btnSendGemini_Click" />
+
         </DockPanel>
 
         <!-- ============================= -->
