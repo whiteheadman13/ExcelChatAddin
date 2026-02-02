@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Windows.Forms;
 using Excel = Microsoft.Office.Interop.Excel;
 using Office = Microsoft.Office.Core;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+
 
 namespace ExcelChatAddin
 {
@@ -27,6 +30,18 @@ namespace ExcelChatAddin
         private int _inManageClick = 0;
         private int _inRegisterClick = 0;
 
+        private HotKeyWindow _hotKeyWindow;
+        private const int HOTKEY_ID_REGISTER = 0x1234;
+
+        private const uint MOD_CONTROL = 0x0002;
+        private const uint MOD_SHIFT = 0x0004;
+
+        [DllImport("user32.dll")]
+        private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+
+        [DllImport("user32.dll")]
+        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
 
 
         // 追加：マスキング関連（右クリックに追加するメニュー）
@@ -41,8 +56,8 @@ namespace ExcelChatAddin
             PurgeMaskMenus();     // 全掃除
 
             AddMaskManageMenu();  // ★通常モード専用
-            AddMaskRegisterMenus(); // ★編集モード専用
-
+            //AddMaskRegisterMenus(); // ★編集モード専用
+            RegisterHotKey_CtrlShiftM();
             this.Application.WorkbookBeforeClose += Application_WorkbookBeforeClose;
         }
         private void AddMaskManageMenu()
@@ -63,14 +78,91 @@ namespace ExcelChatAddin
             }
             catch { }
         }
-        private void AddMaskRegisterMenus()
+        
+        private void RegisterHotKey_CtrlShiftM()
         {
-            // 編集モードでも最悪 Cell が出る環境があるので、Cellにも出す
-            TryAddRegisterToBar("Cell");
+            // Excel のメインウィンドウに WM_HOTKEY を飛ばす
+            IntPtr hwnd = new IntPtr(this.Application.Hwnd);
 
-            // 編集モード候補も1つだけ（優先順）
-            TryAddRegisterToFirstExistingBar(new[] { "Text", "Edit", "Formula Bar" });
+            _hotKeyWindow = new HotKeyWindow(hwnd);
+            _hotKeyWindow.HotKeyPressed += () =>
+            {
+                // UIスレッドへ
+                try
+                {
+                    System.Windows.Forms.Control.FromHandle(hwnd)?.BeginInvoke((Action)(() =>
+                    {
+                        RunMaskRegisterFromShortcut();
+                    }));
+                }
+                catch
+                {
+                    // 最後の保険（BeginInvoke失敗しても動かす）
+                    RunMaskRegisterFromShortcut();
+                }
+            };
+
+            // Ctrl + Shift + M
+            RegisterHotKey(hwnd, HOTKEY_ID_REGISTER, MOD_CONTROL | MOD_SHIFT, (uint)Keys.M);
         }
+        private void RunMaskRegisterFromShortcut()
+        {
+            try
+            {
+                string selected = TryGetSelectedTextInEditMode();
+                if (string.IsNullOrWhiteSpace(selected))
+                {
+                    MessageBox.Show(
+                        "セル編集モードで、登録したい文字列を選択してから Ctrl+Shift+M を押してください。",
+                        "マスキング登録");
+                    return;
+                }
+
+                var rules = MaskingEngine.Instance.GetAllRules();
+                if (rules != null && rules.TryGetValue(selected, out var ph))
+                {
+                    MessageBox.Show($"すでに登録済みです。\n\n対象: {selected}\n置換: {ph}", "マスキング登録");
+                    return;
+                }
+
+                var owner = new Win32Window(new IntPtr(this.Application.Hwnd));
+                using (var dlg = new RegisterDialog(selected))
+                {
+                    var r = dlg.ShowDialog(owner);
+                    if (r != DialogResult.OK) return;
+
+                    if (dlg.IsNewCategory)
+                        MaskingEngine.Instance.AddRule(selected, dlg.SelectedCategory);
+                    else
+                        MaskingEngine.Instance.AddRuleWithPlaceholder(selected, dlg.SelectedPlaceholder);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "マスキング登録");
+            }
+        }
+
+        private void UnregisterHotKeys()
+        {
+            try
+            {
+                IntPtr hwnd = new IntPtr(this.Application.Hwnd);
+                UnregisterHotKey(hwnd, HOTKEY_ID_REGISTER);
+            }
+            catch { }
+
+            try
+            {
+                if (_hotKeyWindow != null)
+                {
+                    _hotKeyWindow.Dispose();
+                    _hotKeyWindow = null;
+                }
+            }
+            catch { }
+        }
+
         private void TryAddRegisterToBar(string barName)
         {
             try
@@ -189,6 +281,7 @@ namespace ExcelChatAddin
             try { RemoveCellContextMenu(); } catch { }
 
             try { CleanupMaskMenus(); } catch { }
+            try { UnregisterHotKeys(); } catch { }
         }
 
 
@@ -207,6 +300,7 @@ namespace ExcelChatAddin
             {
                 //this.Application.SheetBeforeRightClick -= Application_SheetBeforeRightClick;
                 this.Application.WorkbookBeforeClose -= Application_WorkbookBeforeClose;
+                try { UnregisterHotKeys(); } catch { }
             }
             catch { }
         }
@@ -260,31 +354,7 @@ namespace ExcelChatAddin
             }
             catch { }
         }
-        private void DebugDumpActiveCommandBars()
-        {
-            try
-            {
-                System.Diagnostics.Debug.WriteLine("=== CommandBars dump (visible/enabled) ===");
-                foreach (Office.CommandBar cb in this.Application.CommandBars)
-                {
-                    try
-                    {
-                        // Visible/Enabled を持たないものもあるので try
-                        bool visible = false;
-                        bool enabled = false;
-                        try { visible = cb.Visible; } catch { }
-                        try { enabled = cb.Enabled; } catch { }
-
-                        if (visible || enabled)
-                        {
-                            System.Diagnostics.Debug.WriteLine($"Bar: {cb.Name}  Visible={visible} Enabled={enabled}");
-                        }
-                    }
-                    catch { }
-                }
-            }
-            catch { }
-        }
+        
 
         private DateTime _lastRegClick = DateTime.MinValue;
         // =========================================================
@@ -292,7 +362,7 @@ namespace ExcelChatAddin
         // =========================================================
         private void BtnReg_Click(Office.CommandBarButton Ctrl, ref bool CancelDefault)
         {
-            DebugDumpActiveCommandBars();
+           
             // ★同時発火（複数バー）を完全に止める
             if (System.Threading.Interlocked.Exchange(ref _inRegisterClick, 1) == 1)
                 return;

@@ -88,18 +88,22 @@ namespace ExcelChatAddin
 
             foreach (var val in _originalData.Values)
             {
-                string content = val.Trim('[', ']');
-                int underscoreIndex = content.LastIndexOf('_');
-                if (underscoreIndex > 0)
-                {
-                    string cat = content.Substring(0, underscoreIndex);
-                    categories.Add(cat);
-                }
+                var cat = TryGetCategory(val);
+                if (!string.IsNullOrEmpty(cat)) categories.Add(cat);
             }
 
             _cmbFilter.Items.Clear();
             _cmbFilter.Items.AddRange(categories.ToArray());
             _cmbFilter.SelectedIndex = 0; // "すべて"を選択
+        }
+        private static string TryGetCategory(string placeholder)
+        {
+            // __CATEGORY_12__ を想定
+            var m = System.Text.RegularExpressions.Regex.Match(
+                placeholder ?? "",
+                @"^__(?<cat>.+?)_(?<n>\d+)__$");
+
+            return m.Success ? m.Groups["cat"].Value : "";
         }
 
         // フィルター適用ロジック (カテゴリ AND 検索文字列)

@@ -196,6 +196,7 @@
     <Compile Include="DictionaryManager.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="HotKeyWindow.cs" />
     <Compile Include="MaskingEngine.cs" />
     <Compile Include="Paths.cs" />
     <Compile Include="Properties\AssemblyInfo.cs">
