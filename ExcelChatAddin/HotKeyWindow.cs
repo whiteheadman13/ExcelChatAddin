@@ -15,7 +15,13 @@ namespace ExcelChatAddin
 
         protected override void WndProc(ref Message m)
         {
+           
             const int WM_HOTKEY = 0x0312;
+            //if (m.Msg == WM_HOTKEY)
+            //{
+            //    MessageBox.Show("WM_HOTKEY received");
+            //    HotKeyPressed?.Invoke();
+            //}
             if (m.Msg == WM_HOTKEY)
             {
                 HotKeyPressed?.Invoke();

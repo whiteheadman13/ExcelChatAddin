@@ -30,6 +30,10 @@ namespace ExcelChatAddin
         private bool _manageDialogOpen = false;
         private int _inManageClick = 0;
         private int _inRegisterClick = 0;
+        private int _inHotKeyRegister = 0;
+        private DateTime _lastHotKey = DateTime.MinValue;
+        private long _lastHotKeyTicks = 0; // DateTimeより安定
+
 
         private HotKeyWindow _hotKeyWindow;
         private const int HOTKEY_ID_REGISTER = 0x1234;
@@ -38,12 +42,18 @@ namespace ExcelChatAddin
         private const uint MOD_SHIFT = 0x0004;
 
         [DllImport("user32.dll", SetLastError = true, EntryPoint = "RegisterHotKey")]
-        private static extern bool RegisterHotKeyNative(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+        private static extern bool RegisterHotKeyNative(
+            IntPtr hWnd,
+            int id,
+            uint fsModifiers,
+            uint vk
+        );
 
         [DllImport("user32.dll", SetLastError = true, EntryPoint = "UnregisterHotKey")]
-        private static extern bool UnregisterHotKeyNative(IntPtr hWnd, int id);
-
-
+        private static extern bool UnregisterHotKeyNative(
+            IntPtr hWnd,
+            int id
+        );
 
 
 
@@ -85,38 +95,43 @@ namespace ExcelChatAddin
 
         private void RegisterHotKey_CtrlShiftM()
         {
+            try { UnregisterHotKeys(); } catch { } // ★先に掃除
             IntPtr hwnd = new IntPtr(this.Application.Hwnd);
 
             _hotKeyWindow = new HotKeyWindow(hwnd);
             _hotKeyWindow.HotKeyPressed += () =>
             {
-                try
-                {
-                    System.Windows.Forms.Control.FromHandle(hwnd)?.BeginInvoke((Action)(() =>
-                    {
-                        RunMaskRegisterFromShortcut();
-                    }));
-                }
-                catch
-                {
-                    RunMaskRegisterFromShortcut();
-                }
+                // WM_HOTKEY は hwnd を所有するスレッド（=Excel UIスレッド）で届くので、
+                // 基本は直呼びでOK
+                RunMaskRegisterFromShortcut();
             };
 
             bool ok = RegisterHotKeyNative(hwnd, HOTKEY_ID_REGISTER, MOD_CONTROL | MOD_SHIFT, (uint)Keys.M);
-
-
             if (!ok)
             {
                 int err = Marshal.GetLastWin32Error();
-                MessageBox.Show(
-                    $"Ctrl+Shift+M のショートカット登録に失敗しました。\n\nWin32Error: {err}\n他アプリ/Excel設定と競合している可能性があります。",
-                    "マスキング登録");
+                MessageBox.Show($"Ctrl+Shift+M の登録に失敗しました。Win32Error={err}", "マスキング登録");
             }
         }
 
+
+
         private void RunMaskRegisterFromShortcut()
         {
+            // ★時間ガードはロック前（ここで return してもロック不要）
+            long nowTicks = DateTime.UtcNow.Ticks;
+            long last = System.Threading.Interlocked.Read(ref _lastHotKeyTicks);
+
+            // 600ms = 600 * 10,000 ticks
+            if (nowTicks - last < 600L * 10_000L)
+                return;
+
+            System.Threading.Interlocked.Exchange(ref _lastHotKeyTicks, nowTicks);
+
+            // ★排他（ここから先は必ず finally で解除）
+            if (System.Threading.Interlocked.Exchange(ref _inHotKeyRegister, 1) == 1)
+                return;
+
             try
             {
                 string selected = TryGetSelectedTextInEditMode();
@@ -151,7 +166,12 @@ namespace ExcelChatAddin
             {
                 MessageBox.Show(ex.ToString(), "マスキング登録");
             }
+            finally
+            {
+                System.Threading.Interlocked.Exchange(ref _inHotKeyRegister, 0);
+            }
         }
+
 
         private void UnregisterHotKeys()
         {
@@ -159,6 +179,7 @@ namespace ExcelChatAddin
             {
                 IntPtr hwnd = new IntPtr(this.Application.Hwnd);
                 UnregisterHotKeyNative(hwnd, HOTKEY_ID_REGISTER);
+
             }
             catch { }
 
