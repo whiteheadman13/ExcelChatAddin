@@ -7,35 +7,59 @@
     <Grid Margin="8">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="140"/>
-            <RowDefinition Height="8"/>
+            <!-- ヘッダ -->
             <RowDefinition Height="*"/>
+            <!-- チャット履歴 -->
+            <RowDefinition Height="Auto"/>
+            <!-- マスキング操作（👁） -->
+            <RowDefinition Height="120"/>
+            <!-- マスキングプレビュー -->
+            <RowDefinition Height="Auto"/>
+            <!-- 入力＋送信 -->
         </Grid.RowDefinitions>
 
         <!-- ============================= -->
-        <!-- 操作ヘッダ（タイトル＋ボタン） -->
+        <!-- ヘッダ -->
         <!-- ============================= -->
-        <DockPanel Grid.Row="0" Margin="0,0,0,6">
-            <TextBlock Text="指示（上：rangeプレビュー / 下：入力）"
-                       FontWeight="Bold"
-                       VerticalAlignment="Center"/>
-
-            <StackPanel Orientation="Horizontal"
-                        DockPanel.Dock="Right">
-                <Button Content="マスキング確認"
-                        Margin="8,0,0,0"
-                        Padding="10,4"
-                        Click="BtnMaskPreview_Click"/>
-            </StackPanel>
-            <Button x:Name="btnSendGemini" Content="Gemini送信" Click="btnSendGemini_Click" />
-
-        </DockPanel>
+        <TextBlock Grid.Row="0"
+                   Text="指示（中央：チャット履歴 / 下：入力）"
+                   FontWeight="Bold"
+                   Margin="0,0,0,6"/>
 
         <!-- ============================= -->
-        <!-- range プレビュー（表示専用） -->
+        <!-- チャット履歴（表示専用） -->
+        <!-- ============================= -->
+        <TextBox x:Name="ChatHistoryBox"
+                 Grid.Row="1"
+                 Margin="0,0,0,6"
+                 IsReadOnly="True"
+                 AcceptsReturn="True"
+                 TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto"
+                 Background="#FFF8F8F8"
+                 BorderBrush="#FFCCCCCC"
+                 BorderThickness="1"
+                 Padding="6"/>
+
+        <!-- ============================= -->
+        <!-- マスキング操作（入力欄の上：右寄せ） -->
+        <!-- ============================= -->
+        <StackPanel Grid.Row="2"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Margin="0,0,0,4">
+            <Button Content="👁"
+                    Width="36"
+                    Height="28"
+                    ToolTip="入力内容のマスキング確認"
+                    Click="BtnMaskPreview_Click"/>
+        </StackPanel>
+
+        <!-- ============================= -->
+        <!-- マスキングプレビュー（表示専用） -->
         <!-- ============================= -->
         <RichTextBox x:Name="PreviewBox"
-                     Grid.Row="1"
+                     Grid.Row="3"
                      IsReadOnly="True"
                      IsDocumentEnabled="True"
                      VerticalScrollBarVisibility="Auto"
@@ -44,32 +68,41 @@
                      FontSize="16"/>
 
         <!-- ============================= -->
-        <!-- スプリッター -->
+        <!-- 入力欄 ＋ Gemini送信（入力右） -->
         <!-- ============================= -->
-        <GridSplitter Grid.Row="2"
-                      Height="8"
-                      HorizontalAlignment="Stretch"/>
+        <Grid Grid.Row="4" Margin="0,6,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
 
-        <!-- ============================= -->
-        <!-- 入力欄（編集専用） -->
-        <!-- ============================= -->
-        <TextBox x:Name="InputBox"
-         Grid.Row="3"
-         AcceptsReturn="True"
-         TextWrapping="Wrap"
-         VerticalScrollBarVisibility="Auto"
-         BorderThickness="1"
-         Padding="8"
-         FontSize="16"
-         TextChanged="InputBox_TextChanged">
+            <!-- 入力欄 -->
+            <TextBox x:Name="InputBox"
+                     Grid.Column="0"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
+                     BorderThickness="1"
+                     Padding="8"
+                     FontSize="16"
+                     TextChanged="InputBox_TextChanged">
+                <TextBox.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="選択文字列をマスキング登録"
+                                  Click="MenuRegisterMask_Click"/>
+                    </ContextMenu>
+                </TextBox.ContextMenu>
+            </TextBox>
 
-            <TextBox.ContextMenu>
-                <ContextMenu>
-                    <MenuItem Header="選択文字列をマスキング登録" Click="MenuRegisterMask_Click"/>
-                </ContextMenu>
-            </TextBox.ContextMenu>
-
-        </TextBox>
+            <!-- 送信ボタン -->
+            <Button x:Name="btnSendGemini"
+                    Grid.Column="1"
+                    Content="送信"
+                    Margin="6,0,0,0"
+                    Padding="16,8"
+                    FontSize="16"
+                    Click="btnSendGemini_Click"/>
+        </Grid>
 
     </Grid>
 

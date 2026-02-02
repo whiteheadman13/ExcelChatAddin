@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using Excel = Microsoft.Office.Interop.Excel;
 
 namespace ExcelChatAddin
 {
@@ -20,7 +21,27 @@ namespace ExcelChatAddin
         private static readonly Regex RangeTagRegex =
             new Regex(@"@range\(\s*(?<sheet>[^,\)]+)\s*,\s*(?<addr>[^\)]+)\s*\)",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        private static Excel.Range TryResolveRangeFromText(Excel.Application app, string text)
+        {
+            if (app == null || string.IsNullOrWhiteSpace(text)) return null;
 
+            // @range(Sheet1,B11) or @range(Sheet1,B11:C20)
+            var m = Regex.Match(text, @"@range\((?<sheet>[^,\)]+)\s*,\s*(?<addr>[^\)]+)\)");
+            if (!m.Success) return null;
+
+            var sheetName = m.Groups["sheet"].Value.Trim();
+            var addr = m.Groups["addr"].Value.Trim();
+
+            try
+            {
+                var ws = (Excel.Worksheet)app.Worksheets[sheetName];
+                return ws.Range[addr];
+            }
+            catch
+            {
+                return null;
+            }
+        }
         public ChatView()
         {
             InitializeComponent();
@@ -46,30 +67,127 @@ namespace ExcelChatAddin
         {
             try
             {
-                var raw = InputBox.Text;
-                if (string.IsNullOrWhiteSpace(raw))
-                    return;
+                var raw = InputBox.Text ?? "";
+                if (string.IsNullOrWhiteSpace(raw)) return;
 
-                // 既存のマスキング辞書を適用（辞書は保存されるが、会話履歴は保存しない）
-                var masked = MaskingEngine.Instance.Mask(raw);
+                var app = Globals.ThisAddIn.Application;
 
-                btnSendGemini.IsEnabled = false;
+                // ★ ① 入力欄の @range(...) を優先して解決
+                Excel.Range rng = TryResolveRangeFromText(app, raw);
+
+                // ★ ② 無ければ Selection から取得（従来のやり方）
+                if (rng == null)
+                {
+                    try { rng = app.Selection as Excel.Range; } catch { rng = null; }
+                }
+
+                // ★ ③ さらに無ければ ActiveCell（任意の保険）
+                if (rng == null)
+                {
+                    try { rng = app.ActiveCell as Excel.Range; } catch { rng = null; }
+                }
+
+                var rangeText = RangeToText(rng);
+                var rangeLabel = (rng != null)
+                    ? $"{rng.Worksheet.Name}!{rng.Address[false, false]}"
+                    : "(なし)";
+
+                // 送信payload（Geminiが迷わないように “範囲ラベル” を必ず付ける）
+                var payload =
+                    "【入力】\n" + raw + "\n\n" +
+                    "【対象範囲】\n" + rangeLabel + "\n" +
+                    (string.IsNullOrWhiteSpace(rangeText) ? "(値なし)" : rangeText);
+
+                var shown =
+                rng != null
+                ? $"{raw}\n@range({rng.Worksheet.Name},{rng.Address[false, false]})"
+                : raw;
+
+                Dispatcher.Invoke(() =>
+                {
+                    AppendChat("You", shown);
+                    btnSendGemini.IsEnabled = false;
+                });
+
+
+                var masked = MaskingEngine.Instance.Mask(payload);
 
                 var client = new GeminiClient();
                 var response = await client.SendAsync(masked);
 
-                // 応答を表示して終わり（パワポ仕様）
-                var w = new GeminiResponseWindow(response);
-                w.ShowDialog();
+                Dispatcher.Invoke(() =>
+                {
+                    AppendChat("Gemini", response);
+                    btnSendGemini.IsEnabled = true;
+                });
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show(ex.Message, "Gemini送信エラー");
+                Dispatcher.Invoke(() =>
+                {
+                    btnSendGemini.IsEnabled = true;
+                    MessageBox.Show(ex.Message, "Gemini送信エラー");
+                });
             }
-            finally
+        }
+
+
+
+        private static string RangeToText(Excel.Range rng)
+        {
+            if (rng == null) return "";
+
+            object v;
+            try
             {
-                btnSendGemini.IsEnabled = true;
+                v = rng.Value2;
             }
+            catch
+            {
+                return "";
+            }
+
+            if (v == null) return "";
+
+            // 単一セル（scalar）
+            if (!(v is object[,]))
+            {
+                return Convert.ToString(v) ?? "";
+            }
+
+            // 複数セル（2次元配列）
+            var a = (object[,])v;
+
+            int r1 = a.GetLowerBound(0);
+            int r2 = a.GetUpperBound(0);
+            int c1 = a.GetLowerBound(1);
+            int c2 = a.GetUpperBound(1);
+
+            var sb = new StringBuilder();
+
+            for (int r = r1; r <= r2; r++)
+            {
+                for (int c = c1; c <= c2; c++)
+                {
+                    if (c > c1) sb.Append('\t');   // TSV
+                    sb.Append(a[r, c]?.ToString() ?? "");
+                }
+                if (r < r2) sb.AppendLine();
+            }
+
+            return sb.ToString();
+        }
+
+        private void AppendChat(string role, string text)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => AppendChat(role, text));
+                return;
+            }
+
+            ChatHistoryBox.AppendText($"[{role}]\n{text}\n\n");
+            ChatHistoryBox.ScrollToEnd();
         }
 
 
