@@ -38,6 +38,7 @@ namespace ExcelChatAddin
         private HotKeyWindow _hotKeyWindow;
         private const int HOTKEY_ID_REGISTER = 0x1234;
 
+        private const uint MOD_ALT = 0x0001;
         private const uint MOD_CONTROL = 0x0002;
         private const uint MOD_SHIFT = 0x0004;
 
@@ -96,21 +97,34 @@ namespace ExcelChatAddin
         private void RegisterHotKey_CtrlShiftM()
         {
             try { UnregisterHotKeys(); } catch { } // ★先に掃除
-            IntPtr hwnd = new IntPtr(this.Application.Hwnd);
 
-            _hotKeyWindow = new HotKeyWindow(hwnd);
-            _hotKeyWindow.HotKeyPressed += () =>
+            try
             {
-                // WM_HOTKEY は hwnd を所有するスレッド（=Excel UIスレッド）で届くので、
-                // 基本は直呼びでOK
-                RunMaskRegisterFromShortcut();
-            };
+                IntPtr hwnd = new IntPtr(this.Application.Hwnd);
+                System.Diagnostics.Debug.WriteLine($"[HotKey] Excel HWND: {hwnd.ToString("X8")}");
 
-            bool ok = RegisterHotKeyNative(hwnd, HOTKEY_ID_REGISTER, MOD_CONTROL | MOD_SHIFT, (uint)Keys.M);
-            if (!ok)
+                _hotKeyWindow = new HotKeyWindow(hwnd);
+                _hotKeyWindow.HotKeyPressed += () =>
+                {
+                    System.Diagnostics.Debug.WriteLine("[HotKey] Ctrl+Alt+M pressed!");
+                    RunMaskRegisterFromShortcut();
+                };
+
+                // Windows API で Ctrl+Alt+M を登録（Ctrl+Shift+M は既に他のアプリで使用中）
+                bool ok = RegisterHotKeyNative(hwnd, HOTKEY_ID_REGISTER, MOD_CONTROL | MOD_ALT, (uint)Keys.M);
+                System.Diagnostics.Debug.WriteLine($"[HotKey] RegisterHotKey result: {ok}");
+
+                if (!ok)
+                {
+                    int err = Marshal.GetLastWin32Error();
+                    System.Diagnostics.Debug.WriteLine($"[HotKey] RegisterHotKey error code: {err}");
+                    MessageBox.Show($"Ctrl+Alt+M の登録に失敗しました。\nWin32Error={err}\n\nこのショートキーは既に別のアプリケーションで使用されている可能性があります。", "ホットキー登録");
+                }
+            }
+            catch (Exception ex)
             {
-                int err = Marshal.GetLastWin32Error();
-                MessageBox.Show($"Ctrl+Shift+M の登録に失敗しました。Win32Error={err}", "マスキング登録");
+                System.Diagnostics.Debug.WriteLine($"[HotKey] Exception: {ex}");
+                MessageBox.Show($"ホットキー登録中に例外が発生しました。\nエラー: {ex.Message}", "ホットキー登録");
             }
         }
 
@@ -138,7 +152,7 @@ namespace ExcelChatAddin
                 if (string.IsNullOrWhiteSpace(selected))
                 {
                     MessageBox.Show(
-                        "セル編集モードで、登録したい文字列を選択してから Ctrl+Shift+M を押してください。",
+                        "セル編集モードで、登録したい文字列を選択してから Ctrl+Alt+M を押してください。",
                         "マスキング登録");
                     return;
                 }
@@ -178,8 +192,8 @@ namespace ExcelChatAddin
             try
             {
                 IntPtr hwnd = new IntPtr(this.Application.Hwnd);
-                UnregisterHotKeyNative(hwnd, HOTKEY_ID_REGISTER);
-
+                bool ok = UnregisterHotKeyNative(hwnd, HOTKEY_ID_REGISTER);
+                System.Diagnostics.Debug.WriteLine($"[HotKey] UnregisterHotKey result: {ok}");
             }
             catch { }
 
