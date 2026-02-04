@@ -32,6 +32,7 @@
                        FontWeight="Bold" />
 
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <CheckBox x:Name="chkUseTable" Content="表形式で表示" VerticalAlignment="Center" Margin="0,0,8,0" Checked="ChkUseTable_Checked" Unchecked="ChkUseTable_Unchecked"/>
                 <Button Content="クリア履歴" Width="80" Height="24" Click="ClearHistory_Click" ToolTip="チャット履歴をクリア" Margin="0,0,6,0"/>
                 <Button Content="クリア入力" Width="80" Height="24" Click="ClearInput_Click" ToolTip="入力欄をクリア"/>
             </StackPanel>

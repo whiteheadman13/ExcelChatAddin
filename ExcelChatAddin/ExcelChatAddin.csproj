@@ -195,6 +195,7 @@
   -->
   <ItemGroup>
     <Compile Include="ChatModels.cs" />
+    <Compile Include="DebugLogger.cs" />
     <Compile Include="DictionaryManager.cs">
       <SubType>Form</SubType>
     </Compile>

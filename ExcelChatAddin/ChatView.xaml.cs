@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Data.SqlTypes;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -13,6 +14,9 @@ namespace ExcelChatAddin
 {
     public partial class ChatView : UserControl
     {
+        // チェックボックスで表形式出力を要求するか
+        private bool _useTableFormat = false;
+
         private TaskPaneHost _host;
         // 範囲の送信マッピング（セッション内で重複送信を避けるため）
         private readonly Dictionary<string, string> _rangeRefMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -103,6 +107,12 @@ namespace ExcelChatAddin
 
                 var payload = BuildMaskedPayload(raw, rangeLabel, rangeText, true);
 
+                // If user requested table output, instruct LLM to return Markdown table
+                if (_useTableFormat)
+                {
+                    payload += "\n\n出力形式: 結果をMarkdownの表形式（| 列1 | 列2 | ... |）で返してください。必ずヘッダー行を含め、表以外の余計な説明は最小限にしてください。";
+                }
+
                 // 表示は入力欄の内容のみを表示する（参照データはペイロードで送付するためチャット欄には重複表示しない）
                 var shown = raw;
 
@@ -129,7 +139,9 @@ namespace ExcelChatAddin
                 // ただし保険として再マスクしておく。
                 
                 var client = new GeminiClient();
+                DebugLogger.LogInfo("Sending to Gemini...");
                 var response = await client.SendAsync(masked);
+                DebugLogger.LogInfo("Received response from Gemini (raw length: " + (response?.Length ?? 0) + ")");
 
                 // 受信したレスポンスをアンマスクしてから表示する
                 var unmaskedResponse = MaskingEngine.Instance.Unmask(response);
@@ -242,9 +254,20 @@ namespace ExcelChatAddin
                 VerticalAlignment = VerticalAlignment.Top,
                 Margin = new Thickness(6, 0, 0, 0)
             };
+            // click handler will copy either raw text or converted TSV if the content is a table
             copyBtn.Click += (_, __) =>
             {
-                try { Clipboard.SetText(text ?? ""); }
+                try
+                {
+                    if (TryParseMarkdownTable(text ?? "", out var rows))
+                    {
+                        Clipboard.SetText(RowsToTsv(rows));
+                    }
+                    else
+                    {
+                        Clipboard.SetText(text ?? "");
+                    }
+                }
                 catch { }
             };
             DockPanel.SetDock(copyBtn, Dock.Right);
@@ -253,14 +276,66 @@ namespace ExcelChatAddin
             grid.Children.Add(headerPanel);
             Grid.SetRow(headerPanel, 0);
 
-            var bodyText = new TextBlock
+            // If text looks like a Markdown table, render as FlowDocument Table inside a read-only RichTextBox
+            if (TryParseMarkdownTable(text ?? "", out var tableRows))
             {
-                Text = text ?? "",
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 6, 0, 0)
-            };
-            grid.Children.Add(bodyText);
-            Grid.SetRow(bodyText, 1);
+                var rtb = new RichTextBox
+                {
+                    IsReadOnly = true,
+                    BorderThickness = new Thickness(0),
+                    FontSize = 14,
+                    Margin = new Thickness(0, 6, 0, 0),
+                    Background = System.Windows.Media.Brushes.Transparent
+                };
+
+                var docTable = new FlowDocument { PagePadding = new Thickness(0) };
+                var table = new Table();
+
+                int cols = tableRows[0].Length;
+                for (int i = 0; i < cols; i++) table.Columns.Add(new TableColumn());
+
+                var trg = new TableRowGroup();
+
+                // header
+                var headerRow = new TableRow();
+                foreach (var h in tableRows[0])
+                {
+                    var cell = new TableCell(new Paragraph(new Run(h.Trim()))) { Padding = new Thickness(4), FontWeight = FontWeights.Bold };
+                    headerRow.Cells.Add(cell);
+                }
+                trg.Rows.Add(headerRow);
+
+                // body
+                for (int r = 1; r < tableRows.Count; r++)
+                {
+                    var row = new TableRow();
+                    for (int c = 0; c < cols; c++)
+                    {
+                        var txt = c < tableRows[r].Length ? tableRows[r][c].Trim() : "";
+                        var cell = new TableCell(new Paragraph(new Run(txt))) { Padding = new Thickness(4) };
+                        row.Cells.Add(cell);
+                    }
+                    trg.Rows.Add(row);
+                }
+
+                table.RowGroups.Add(trg);
+                docTable.Blocks.Add(table);
+                rtb.Document = docTable;
+
+                grid.Children.Add(rtb);
+                Grid.SetRow(rtb, 1);
+            }
+            else
+            {
+                var bodyText = new TextBlock
+                {
+                    Text = text ?? "",
+                    TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 6, 0, 0)
+                };
+                grid.Children.Add(bodyText);
+                Grid.SetRow(bodyText, 1);
+            }
 
             container.Child = grid;
 
@@ -780,6 +855,119 @@ namespace ExcelChatAddin
             }
 
             PreviewBox.Document = doc;
+        }
+
+        private void ChkUseTable_Checked(object sender, RoutedEventArgs e)
+        {
+            _useTableFormat = true;
+        }
+
+        private void ChkUseTable_Unchecked(object sender, RoutedEventArgs e)
+        {
+            _useTableFormat = false;
+        }
+
+        // Try to parse a Markdown-style table (or TSV) from text.
+        // Returns rows as array of string[] with header at [0].
+        private bool TryParseMarkdownTable(string text, out List<string[]> rows)
+        {
+            rows = null;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => l.Trim()).ToList();
+            if (lines.Count < 2) return false;
+
+            // 1) Standard Markdown with separator line (|---|---|)
+            if (lines[0].Contains("|") && lines.Count >= 2 && Regex.IsMatch(lines[1], @"^[\|\s:\-]+$"))
+            {
+                try
+                {
+                    rows = new List<string[]>();
+                    foreach (var ln in lines)
+                    {
+                        if (!ln.Contains("|")) break;
+                        var parts = ln.Split('|').Select(p => p.Trim()).ToArray();
+                        // remove empty leading/trailing if split produced them
+                        if (parts.Length > 0 && string.IsNullOrEmpty(parts[0])) parts = parts.Skip(1).ToArray();
+                        if (parts.Length > 0 && string.IsNullOrEmpty(parts.Last())) parts = parts.Take(parts.Length - 1).ToArray();
+                        rows.Add(parts);
+                    }
+
+                    // drop separator row if present (contains only - or :)
+                    if (rows.Count >= 2 && rows[1].All(s => Regex.IsMatch(s, @"^[:\-]+$")))
+                    {
+                        rows.RemoveAt(1);
+                    }
+
+                    return rows.Count >= 1;
+                }
+                catch { return false; }
+            }
+
+            // 2) Simple pipe table without separator (header and following rows with pipes)
+            if (lines[0].Contains("|") && lines.Skip(1).Any(l => l.Contains("|")))
+            {
+                try
+                {
+                    // take consecutive pipe-containing lines from the start
+                    var tableLines = new List<string>();
+                    foreach (var ln in lines)
+                    {
+                        if (string.IsNullOrWhiteSpace(ln)) break;
+                        if (!ln.Contains("|")) break;
+                        tableLines.Add(ln);
+                    }
+
+                    if (tableLines.Count < 2) return false;
+
+                    rows = new List<string[]>();
+                    int maxCols = 0;
+                    foreach (var ln in tableLines)
+                    {
+                        var parts = ln.Split('|').Select(p => p.Trim()).ToArray();
+                        // remove empty leading/trailing if split produced them
+                        if (parts.Length > 0 && string.IsNullOrEmpty(parts[0])) parts = parts.Skip(1).ToArray();
+                        if (parts.Length > 0 && string.IsNullOrEmpty(parts.Last())) parts = parts.Take(parts.Length - 1).ToArray();
+                        rows.Add(parts);
+                        if (parts.Length > maxCols) maxCols = parts.Length;
+                    }
+
+                    // normalize row lengths
+                    for (int i = 0; i < rows.Count; i++)
+                    {
+                        if (rows[i].Length < maxCols)
+                        {
+                            var a = new string[maxCols];
+                            for (int j = 0; j < maxCols; j++) a[j] = j < rows[i].Length ? rows[i][j] : "";
+                            rows[i] = a;
+                        }
+                    }
+
+                    return rows.Count >= 1;
+                }
+                catch { return false; }
+            }
+
+            // Fallback: TSV detection (tab separated with multiple columns)
+            var toks = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            if (toks.Length >= 1 && toks.Any(t => t.Contains('\t')))
+            {
+                rows = toks.Select(t => t.Split('\t')).ToList();
+                return rows.Count >= 1 && rows[0].Length > 1;
+            }
+
+            return false;
+        }
+
+        private string RowsToTsv(List<string[]> rows)
+        {
+            var sb = new StringBuilder();
+            foreach (var r in rows)
+            {
+                sb.AppendLine(string.Join("\t", r.Select(c => c ?? "")));
+            }
+            return sb.ToString();
         }
     }
 }
