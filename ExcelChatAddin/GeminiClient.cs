@@ -73,7 +73,7 @@ namespace ExcelChatAddin
             DebugLogger.LogInfo($"Payload length: {maskedText?.Length ?? 0}");
             var apiKey = GetApiKey();
             if (string.IsNullOrWhiteSpace(apiKey))
-                throw new Exception("環境変数 GEMINI_API_KEY が設定されていません。");
+                throw new Exception("環境変数 GEMINI_API_KEY が設定されていません。"); // Ensure API key is set
 
             // if maskedText contains an explicit instruction to output Markdown table, allow Markdown in system instruction
             bool allowMarkdown = maskedText != null && maskedText.IndexOf("Markdown", StringComparison.OrdinalIgnoreCase) >= 0;

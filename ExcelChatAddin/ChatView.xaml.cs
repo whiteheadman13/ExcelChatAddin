@@ -14,8 +14,9 @@ namespace ExcelChatAddin
 {
     public partial class ChatView : UserControl
     {
-        // チェックボックスで表形式出力を要求するか
-        private bool _useTableFormat = false;
+        // 以前の "チャット上の表形式表示" は廃止。入力欄側のワンショット指定を使用します。
+        private bool _requestTableForNextSend = false;
+        private string _selectedModel = "gemini-3-flash-preview";
 
         private TaskPaneHost _host;
         // 範囲の送信マッピング（セッション内で重複送信を避けるため）
@@ -107,11 +108,7 @@ namespace ExcelChatAddin
 
                 var payload = BuildMaskedPayload(raw, rangeLabel, rangeText, true);
 
-                // If user requested table output, instruct LLM to return Markdown table
-                if (_useTableFormat)
-                {
-                    payload += "\n\n出力形式: 結果をMarkdownの表形式（| 列1 | 列2 | ... |）で返してください。必ずヘッダー行を含め、表以外の余計な説明は最小限にしてください。";
-                }
+                // NOTE: table request for this send is controlled by the input-area checkbox (_requestTableForNextSend).
 
                 // 表示は入力欄の内容のみを表示する（参照データはペイロードで送付するためチャット欄には重複表示しない）
                 var shown = raw;
@@ -133,6 +130,15 @@ namespace ExcelChatAddin
                 });
 
 
+                // If user requested table for this send (input-area checkbox), append instruction
+                if (_requestTableForNextSend)
+                {
+                    payload += "\n\n出力形式: 結果をMarkdownの表形式（| 列1 | 列2 | ... |）で返してください。必ずヘッダー行を含め、表以外の余計な説明は最小限にしてください。";
+                    // reset one-shot flag
+                    _requestTableForNextSend = false;
+                    chkRequestTable.IsChecked = false;
+                }
+
                 var masked = MaskingEngine.Instance.Mask(payload);
                 // 送信済みの range マップは継続する（セッション内）。
                 // 今回は payload 自体は既に BuildMaskedPayload 内でマスク済みなので再度 Mask は不要,
@@ -140,7 +146,7 @@ namespace ExcelChatAddin
                 
                 var client = new GeminiClient();
                 DebugLogger.LogInfo("Sending to Gemini...");
-                var response = await client.SendAsync(masked);
+                var response = await client.SendAsync(masked, _selectedModel);
                 DebugLogger.LogInfo("Received response from Gemini (raw length: " + (response?.Length ?? 0) + ")");
 
                 // 受信したレスポンスをアンマスクしてから表示する
@@ -1007,14 +1013,29 @@ namespace ExcelChatAddin
             PreviewBox.Document = doc;
         }
 
-        private void ChkUseTable_Checked(object sender, RoutedEventArgs e)
+        // Note: legacy "chat-level table display" removed; use input-area checkbox instead.
+
+        private void ChkRequestTable_Checked(object sender, RoutedEventArgs e)
         {
-            _useTableFormat = true;
+            _requestTableForNextSend = true;
         }
 
-        private void ChkUseTable_Unchecked(object sender, RoutedEventArgs e)
+        private void ChkRequestTable_Unchecked(object sender, RoutedEventArgs e)
         {
-            _useTableFormat = false;
+            _requestTableForNextSend = false;
+        }
+
+        private void CmbModel_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            try
+            {
+                var cb = cmbModel.SelectedItem as ComboBoxItem;
+                if (cb != null && cb.Tag != null)
+                {
+                    _selectedModel = cb.Tag.ToString();
+                }
+            }
+            catch { }
         }
 
         // Try to parse a Markdown-style table (or TSV) from text.

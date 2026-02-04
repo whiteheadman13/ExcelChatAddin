@@ -100,10 +100,9 @@ namespace ExcelChatAddin
 
             try
             {
-                IntPtr hwnd = new IntPtr(this.Application.Hwnd);
-                System.Diagnostics.Debug.WriteLine($"[HotKey] Excel HWND: {hwnd.ToString("X8")}");
+                System.Diagnostics.Debug.WriteLine("[HotKey] Initializing message-only HotKeyWindow");
 
-                _hotKeyWindow = new HotKeyWindow(hwnd);
+                _hotKeyWindow = new HotKeyWindow();
                 _hotKeyWindow.HotKeyPressed += () =>
                 {
                     System.Diagnostics.Debug.WriteLine("[HotKey] Ctrl+Alt+M pressed!");
@@ -111,7 +110,10 @@ namespace ExcelChatAddin
                 };
 
                 // Windows API で Ctrl+Alt+M を登録（Ctrl+Shift+M は既に他のアプリで使用中）
-                bool ok = RegisterHotKeyNative(hwnd, HOTKEY_ID_REGISTER, MOD_CONTROL | MOD_ALT, (uint)Keys.M);
+                IntPtr hwnd = _hotKeyWindow?.WindowHandle ?? IntPtr.Zero;
+                bool ok = false;
+                if (hwnd != IntPtr.Zero)
+                    ok = RegisterHotKeyNative(hwnd, HOTKEY_ID_REGISTER, MOD_CONTROL | MOD_ALT, (uint)Keys.M);
                 System.Diagnostics.Debug.WriteLine($"[HotKey] RegisterHotKey result: {ok}");
 
                 if (!ok)

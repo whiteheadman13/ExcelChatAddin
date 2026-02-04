@@ -5,14 +5,14 @@
              MinHeight="200">
 
     <Grid Margin="8">
-        <Grid.RowDefinitions>
+            <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <!-- ヘッダ -->
             <RowDefinition Height="*"/>
             <!-- チャット履歴 -->
             <RowDefinition Height="Auto"/>
             <!-- マスキング操作（👁） -->
-            <RowDefinition Height="120"/>
+            <RowDefinition Height="40"/>
             <!-- マスキングプレビュー -->
             <RowDefinition Height="Auto"/>
             <!-- 入力＋送信 -->
@@ -32,11 +32,10 @@
                        FontWeight="Bold" />
 
             <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <CheckBox x:Name="chkUseTable" Content="表形式で表示" VerticalAlignment="Center" Margin="0,0,8,0" Checked="ChkUseTable_Checked" Unchecked="ChkUseTable_Unchecked"/>
+                <!-- removed: 表形式で表示 (use input-area checkbox instead) -->
                 <Button Content="クリア履歴" Width="80" Height="24" Click="ClearHistory_Click" ToolTip="チャット履歴をクリア" Margin="0,0,6,0"/>
                 <Button Content="再解析" Width="80" Height="24" Click="ReparseHistory_Click" ToolTip="履歴を再解析して表を検出表示" Margin="0,0,6,0"/>
-                <Button Content="クリア入力" Width="80" Height="24" Click="ClearInput_Click" ToolTip="入力欄をクリア"/>
-            </StackPanel>
+                           </StackPanel>
         </Grid>
 
         <!-- ============================= -->
@@ -61,6 +60,20 @@
                     Orientation="Horizontal"
                     HorizontalAlignment="Right"
                     Margin="0,0,0,4">
+
+            <Button Content="クリア入力" Width="80" Height="28" Click="ClearInput_Click" ToolTip="入力欄をクリア"/>
+            <StackPanel Orientation="Vertical" HorizontalAlignment="Right" Margin="0,0,8,0">
+                <CheckBox x:Name="chkRequestTable" Content="表形式で回答" Checked="ChkRequestTable_Checked" Unchecked="ChkRequestTable_Unchecked" Margin="0,0,0,4"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <ComboBox x:Name="cmbModel" Width="140" SelectionChanged="CmbModel_SelectionChanged">
+                        <ComboBoxItem Tag="gemini-2.5-flash">gemini-2.5-flash</ComboBoxItem>
+                        <ComboBoxItem Tag="gemini-2.5-pro">gemini-2.5-pro</ComboBoxItem>
+                        <ComboBoxItem Tag="gemini-3-flash">gemini-3-flash-preview</ComboBoxItem>
+                        <ComboBoxItem Tag="gemini-3-pro">gemini-3-pro</ComboBoxItem>
+                    </ComboBox>
+                </StackPanel>
+            </StackPanel>
+ 
             <Button Content="👁"
                     Width="36"
                     Height="28"
@@ -74,12 +87,13 @@
         <!-- ============================= -->
         <RichTextBox x:Name="PreviewBox"
                      Grid.Row="3"
+                     Height="28"
                      IsReadOnly="True"
                      IsDocumentEnabled="True"
                      VerticalScrollBarVisibility="Auto"
                      BorderThickness="1"
                      Padding="4"
-                     FontSize="16"/>
+                     FontSize="12"/>
 
         <!-- ============================= -->
         <!-- 入力欄 ＋ Gemini送信（入力右） -->
