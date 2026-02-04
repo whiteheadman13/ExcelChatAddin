@@ -21,10 +21,21 @@
         <!-- ============================= -->
         <!-- ヘッダ -->
         <!-- ============================= -->
-        <TextBlock Grid.Row="0"
-                   Text="指示（中央：チャット履歴 / 下：入力）"
-                   FontWeight="Bold"
-                   Margin="0,0,0,6"/>
+        <Grid Grid.Row="0" Margin="0,0,0,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       Text="指示（中央：チャット履歴 / 下：入力）"
+                       FontWeight="Bold" />
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Button Content="クリア履歴" Width="80" Height="24" Click="ClearHistory_Click" ToolTip="チャット履歴をクリア" Margin="0,0,6,0"/>
+                <Button Content="クリア入力" Width="80" Height="24" Click="ClearInput_Click" ToolTip="入力欄をクリア"/>
+            </StackPanel>
+        </Grid>
 
         <!-- ============================= -->
         <!-- チャット履歴（表示専用） -->

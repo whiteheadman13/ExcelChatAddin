@@ -283,6 +283,26 @@ namespace ExcelChatAddin
             catch { }
         }
 
+        private void ClearHistory_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                ChatHistoryPanel.Children.Clear();
+            }
+            catch { }
+        }
+
+        private void ClearInput_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                InputBox.Clear();
+                RenderPreview();
+                FocusInput();
+            }
+            catch { }
+        }
+
         // ----------------------------
         // 外部から呼ばれる：入力欄へ追記
         // ----------------------------
