@@ -14,6 +14,12 @@ namespace ExcelChatAddin
     public partial class ChatView : UserControl
     {
         private TaskPaneHost _host;
+        // 範囲の送信マッピング（セッション内で重複送信を避けるため）
+        private readonly Dictionary<string, string> _rangeRefMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private int _nextRangeId = 1;
+        // すでに LLM に送付済みの参照 ID（#R1 等）
+        private readonly HashSet<string> _refsSent = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // (範囲はチャット履歴と入力欄に出ているものだけを送る設計)
 
         // ★まだUIが生成されていないタイミングで AppendText された分を溜める
         private readonly List<string> _pendingAppends = new List<string>();
@@ -93,16 +99,10 @@ namespace ExcelChatAddin
                     ? $"{rng.Worksheet.Name}!{rng.Address[false, false]}"
                     : "(なし)";
 
-                // 送信payload（Geminiが迷わないように “範囲ラベル” を必ず付ける）
-                var payload =
-                    "【入力】\n" + raw + "\n\n" +
-                    "【対象範囲】\n" + rangeLabel + "\n" +
-                    (string.IsNullOrWhiteSpace(rangeText) ? "(値なし)" : rangeText);
+                var payload = BuildMaskedPayload(raw, rangeLabel, rangeText, true);
 
-                var shown =
-                rng != null
-                ? $"{raw}\n@range({rng.Worksheet.Name},{rng.Address[false, false]})"
-                : raw;
+                // 表示は入力欄の内容のみを表示する（参照データはペイロードで送付するためチャット欄には重複表示しない）
+                var shown = raw;
 
                 Dispatcher.Invoke(() =>
                 {
@@ -122,7 +122,10 @@ namespace ExcelChatAddin
 
 
                 var masked = MaskingEngine.Instance.Mask(payload);
-
+                // 送信済みの range マップは継続する（セッション内）。
+                // 今回は payload 自体は既に BuildMaskedPayload 内でマスク済みなので再度 Mask は不要,
+                // ただし保険として再マスクしておく。
+                
                 var client = new GeminiClient();
                 var response = await client.SendAsync(masked);
 
@@ -287,7 +290,19 @@ namespace ExcelChatAddin
         {
             try
             {
+                // 記録している現在の選択を取得しておく（クリア直後の自動Includeを判断するため）
+                try
+                {
+                    // no-op: we no longer auto-include Selection; do not record it
+                }
+                catch { }
+
                 ChatHistoryPanel.Children.Clear();
+                // 履歴をクリアしたら範囲マップもリセット
+                _rangeRefMap.Clear();
+                _nextRangeId = 1;
+                _refsSent.Clear();
+                // 履歴クリア時に参照マップはクリア済みのため、以降はチャット履歴/入力に現れる範囲のみ送付されます
             }
             catch { }
         }
@@ -301,6 +316,212 @@ namespace ExcelChatAddin
                 FocusInput();
             }
             catch { }
+        }
+
+        // 指定件数分の直近チャット履歴をプレーンテキストで取得
+        private string GetChatHistoryText(int maxItems)
+        {
+            try
+            {
+                if (ChatHistoryPanel == null) return "";
+
+                var items = new List<string>();
+                for (int i = ChatHistoryPanel.Children.Count - 1; i >= 0 && items.Count < maxItems; i--)
+                {
+                    var child = ChatHistoryPanel.Children[i] as Border;
+                    if (child == null) continue;
+                    var grid = child.Child as Grid;
+                    if (grid == null || grid.Children.Count < 2) continue;
+                    var body = grid.Children[1] as TextBlock;
+                    var header = grid.Children[0] as DockPanel;
+
+                    string role = "";
+                    if (header != null && header.Children.Count > 0)
+                    {
+                        var rt = header.Children[0] as TextBlock;
+                        if (rt != null) role = rt.Text;
+                    }
+
+                    if (body != null)
+                    {
+                        items.Add((role + "\n" + body.Text).Trim());
+                    }
+                }
+
+                items.Reverse();
+                return string.Join("\n\n", items);
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        // Build masked payload using mapping strategy A
+        // commitMapping: true when actually sending (will persist mapping and mark refs as sent)
+        //                false when previewing (do not mutate persistent state)
+        private string BuildMaskedPayload(string rawInput, string rangeLabel, string rangeText, bool commitMapping = true)
+        {
+            var sb = new StringBuilder();
+
+            // use working map so preview does not mutate persistent state
+            var workingMap = commitMapping ? _rangeRefMap : new Dictionary<string, string>(_rangeRefMap, StringComparer.OrdinalIgnoreCase);
+            int workingNextId = commitMapping ? _nextRangeId : _nextRangeId;
+
+            // collect referenced keys in input and in chat history
+            var referencedKeys = new List<string>();
+
+            // from current input
+            foreach (Match m in RangeTagRegex.Matches(rawInput ?? ""))
+            {
+                string sheet = m.Groups["sheet"].Value.Trim();
+                string addr = m.Groups["addr"].Value.Trim();
+                string key = $"{sheet}!{addr}";
+                if (!referencedKeys.Exists(x => string.Equals(x, key, StringComparison.OrdinalIgnoreCase)))
+                    referencedKeys.Add(key);
+            }
+
+            // from chat history (recent)
+            string historyForKeys = GetChatHistoryText(50);
+            foreach (Match m in RangeTagRegex.Matches(historyForKeys ?? ""))
+            {
+                string sheet = m.Groups["sheet"].Value.Trim();
+                string addr = m.Groups["addr"].Value.Trim();
+                string key = $"{sheet}!{addr}";
+                if (!referencedKeys.Exists(x => string.Equals(x, key, StringComparison.OrdinalIgnoreCase)))
+                    referencedKeys.Add(key);
+            }
+
+            // NOTE: do not auto-include implicit Selection/ActiveCell ranges.
+            // Only ranges that appear in the chat history or input are included in referencedKeys.
+
+            // determine which refs need to be included in this payload
+            // Note: LLM is stateless between requests, so include the mapping entries every time the key is referenced.
+            var refsToInclude = new List<(string key, string refId)>();
+            foreach (var key in referencedKeys)
+            {
+                string refId;
+                if (!workingMap.TryGetValue(key, out refId))
+                {
+                    refId = $"R{workingNextId++}";
+                    workingMap[key] = refId;
+                }
+                refsToInclude.Add((key, refId));
+            }
+
+            // append mapping table if any
+            if (refsToInclude.Count > 0)
+            {
+                sb.AppendLine("注: 本文中の @range_ref(#Rn) は以下の参照データに対応します。");
+                sb.AppendLine("【参照データ一覧】");
+                foreach (var t in refsToInclude)
+                {
+                    sb.AppendLine($"#{t.refId} = {t.key}");
+                    // fetch actual range text
+                    string[] parts = t.key.Split('!');
+                    string rt = _host?.GetRangeText(parts[0], parts.Length > 1 ? parts[1] : "") ?? "";
+                    sb.AppendLine(MaskingEngine.Instance.Mask(rt));
+                    sb.AppendLine();
+                }
+            }
+
+            // if committing, persist working map and next id and mark refs as sent
+            if (commitMapping)
+            {
+                _nextRangeId = workingNextId;
+                // workingMap is reference to _rangeRefMap when commitMapping==true so no need to copy
+                foreach (var t in refsToInclude)
+                {
+                    _refsSent.Add(t.refId);
+                }
+            }
+
+            // 2) chat history (replace inline ranges with refs so mapping is explicit)
+            string historyForSending = GetChatHistoryText(20);
+            string historyWithRefs = historyForSending ?? "";
+            foreach (Match m in RangeTagRegex.Matches(historyForSending ?? ""))
+            {
+                string sheet = m.Groups["sheet"].Value.Trim();
+                string addr = m.Groups["addr"].Value.Trim();
+                string key = $"{sheet}!{addr}";
+                if (workingMap.TryGetValue(key, out var rid))
+                {
+                    historyWithRefs = historyWithRefs.Replace(m.Value, $"@range_ref(#{rid})");
+                }
+            }
+            sb.AppendLine("【チャット履歴（参考）】");
+            sb.AppendLine(string.IsNullOrWhiteSpace(historyWithRefs) ? "(なし)" : MaskingEngine.Instance.Mask(historyWithRefs));
+            sb.AppendLine();
+
+            // 3) input body: replace inline ranges with refs if mapped
+            string bodyWithRefs = rawInput ?? "";
+            foreach (Match m in RangeTagRegex.Matches(rawInput ?? ""))
+            {
+                string sheet = m.Groups["sheet"].Value.Trim();
+                string addr = m.Groups["addr"].Value.Trim();
+                string key = $"{sheet}!{addr}";
+                if (workingMap.TryGetValue(key, out var rid))
+                {
+                    bodyWithRefs = bodyWithRefs.Replace(m.Value, $"@range_ref(#{rid})");
+                }
+            }
+
+            sb.AppendLine("【入力】");
+            sb.AppendLine(MaskingEngine.Instance.Mask(bodyWithRefs));
+            sb.AppendLine();
+
+            // 4) target range: refer to ref if possible
+            sb.AppendLine("【対象範囲】");
+            if (!string.IsNullOrWhiteSpace(rangeLabel) && rangeLabel != "(なし)")
+            {
+                if (workingMap.TryGetValue(rangeLabel, out var rr))
+                {
+                    // 対象範囲欄には参照タグのみを表示（実データは【参照データ一覧】に含まれる）
+                    sb.AppendLine($"@range_ref(#{rr})");
+                }
+                else
+                {
+                    sb.AppendLine(MaskingEngine.Instance.Mask(rangeLabel));
+                }
+            }
+            else
+            {
+                sb.AppendLine("(なし)");
+            }
+
+            return sb.ToString();
+        }
+
+        private void BtnSendPreview_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var raw = InputBox.Text ?? "";
+                var app = Globals.ThisAddIn.Application;
+
+                Excel.Range rng = TryResolveRangeFromText(app, raw);
+                if (rng == null && string.IsNullOrWhiteSpace(raw))
+                {
+                    try { rng = app.Selection as Excel.Range; } catch { rng = null; }
+                }
+                if (rng == null && string.IsNullOrWhiteSpace(raw))
+                {
+                    try { rng = app.ActiveCell as Excel.Range; } catch { rng = null; }
+                }
+
+                var rangeText = RangeToText(rng);
+                var rangeLabel = (rng != null) ? $"{rng.Worksheet.Name}!{rng.Address[false, false]}" : "(なし)";
+
+                var payload = BuildMaskedPayload(raw, rangeLabel, rangeText, false);
+
+                var win = new MaskPreviewWindow(payload);
+                win.Owner = Window.GetWindow(this);
+                win.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "Send Preview");
+            }
         }
 
         // ----------------------------

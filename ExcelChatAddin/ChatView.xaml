@@ -64,6 +64,7 @@
                     Height="28"
                     ToolTip="入力内容のマスキング確認"
                     Click="BtnMaskPreview_Click"/>
+            <Button Content="送信プレビュー" Margin="6,0,0,0" Height="28" Click="BtnSendPreview_Click"/>
         </StackPanel>
 
         <!-- ============================= -->
