@@ -254,19 +254,14 @@ namespace ExcelChatAddin
                 VerticalAlignment = VerticalAlignment.Top,
                 Margin = new Thickness(6, 0, 0, 0)
             };
-            // click handler will copy either raw text or converted TSV if the content is a table
+            // click handler will copy either raw text or converted TSV if the content includes tables
             copyBtn.Click += (_, __) =>
             {
                 try
                 {
-                    if (TryParseMarkdownTable(text ?? "", out var rows))
-                    {
-                        Clipboard.SetText(RowsToTsv(rows));
-                    }
-                    else
-                    {
-                        Clipboard.SetText(text ?? "");
-                    }
+                    var displayTextForCopy = ReplaceRangeRefsForDisplay(text ?? "");
+                    var copyText = BuildCopyText(displayTextForCopy);
+                    Clipboard.SetText(copyText ?? "");
                 }
                 catch { }
             };
@@ -276,8 +271,11 @@ namespace ExcelChatAddin
             grid.Children.Add(headerPanel);
             Grid.SetRow(headerPanel, 0);
 
+            // Replace range refs for display in chat (show original @range(...) where possible)
+            var displayText = ReplaceRangeRefsForDisplay(text ?? "");
+
             // If text looks like a Markdown table, render as FlowDocument Table inside a read-only RichTextBox
-            if (TryParseMarkdownTable(text ?? "", out var tableRows))
+            if (TryParseMarkdownTable(displayText ?? "", out var tableRows))
             {
                 var rtb = new RichTextBox
                 {
@@ -329,7 +327,7 @@ namespace ExcelChatAddin
             {
                 var bodyText = new TextBlock
                 {
-                    Text = text ?? "",
+                    Text = displayText ?? "",
                     TextWrapping = TextWrapping.Wrap,
                     Margin = new Thickness(0, 6, 0, 0)
                 };
@@ -351,6 +349,148 @@ namespace ExcelChatAddin
 
 
         public void SetHost(TaskPaneHost host) => _host = host;
+
+        // Re-parse existing chat history items and replace text blocks with table renderings where possible.
+        private void ReparseHistory_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (ChatHistoryPanel == null) return;
+                int converted = 0;
+                for (int i = 0; i < ChatHistoryPanel.Children.Count; i++)
+                {
+                    try
+                    {
+                        var child = ChatHistoryPanel.Children[i] as Border;
+                        if (child == null) continue;
+                        var grid = child.Child as Grid;
+                        if (grid == null || grid.Children.Count < 2) continue;
+
+                        // if already a RichTextBox (table) skip
+                        if (grid.Children[1] is RichTextBox) continue;
+
+                        var body = grid.Children[1] as TextBlock;
+                        if (body == null) continue;
+
+                        var originalText = body.Text ?? "";
+                        var displayText = ReplaceRangeRefsForDisplay(originalText);
+
+                        // split into lines and try to find a contiguous table block
+                        var lines = displayText.Split(new[] { '\r', '\n' }, StringSplitOptions.None).ToList();
+                        int startIdx = -1, endIdx = -1;
+
+                        // prefer Markdown pipe tables
+                        for (int ln = 0; ln < lines.Count; ln++)
+                        {
+                            if (lines[ln].Contains("|"))
+                            {
+                                if (startIdx == -1) startIdx = ln;
+                                endIdx = ln;
+                            }
+                            else
+                            {
+                                if (startIdx != -1) break; // take first contiguous block
+                            }
+                        }
+
+                        // if small block, consider TSV block
+                        if (startIdx == -1 || endIdx - startIdx < 1)
+                        {
+                            startIdx = -1; endIdx = -1;
+                            for (int ln = 0; ln < lines.Count; ln++)
+                            {
+                                if (lines[ln].Contains('\t'))
+                                {
+                                    if (startIdx == -1) startIdx = ln;
+                                    endIdx = ln;
+                                }
+                                else
+                                {
+                                    if (startIdx != -1) break;
+                                }
+                            }
+                        }
+
+                        if (startIdx != -1 && endIdx - startIdx >= 1)
+                        {
+                            var before = string.Join("\n", lines.Take(startIdx));
+                            var block = string.Join("\n", lines.Skip(startIdx).Take(endIdx - startIdx + 1));
+                            var after = string.Join("\n", lines.Skip(endIdx + 1));
+
+                            if (TryParseMarkdownTable(block, out var rows))
+                            {
+                                // build a panel: before text, table, after text
+                                var panel = new StackPanel { Orientation = Orientation.Vertical };
+                                if (!string.IsNullOrWhiteSpace(before))
+                                {
+                                    panel.Children.Add(new TextBlock { Text = before.Trim(), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4) });
+                                }
+
+                                var rtb = new RichTextBox
+                                {
+                                    IsReadOnly = true,
+                                    BorderThickness = new Thickness(0),
+                                    FontSize = 14,
+                                    Margin = new Thickness(0, 6, 0, 0),
+                                    Background = System.Windows.Media.Brushes.Transparent
+                                };
+
+                                var docTable = new FlowDocument { PagePadding = new Thickness(0) };
+                                var table = new Table();
+                                int cols = rows[0].Length;
+                                for (int c = 0; c < cols; c++) table.Columns.Add(new TableColumn());
+                                var trg = new TableRowGroup();
+
+                                var headerRow = new TableRow();
+                                foreach (var h in rows[0]) headerRow.Cells.Add(new TableCell(new Paragraph(new Run(h.Trim()))) { Padding = new Thickness(4), FontWeight = FontWeights.Bold });
+                                trg.Rows.Add(headerRow);
+
+                                for (int r = 1; r < rows.Count; r++)
+                                {
+                                    var row = new TableRow();
+                                    for (int c = 0; c < cols; c++)
+                                    {
+                                        var txt = c < rows[r].Length ? rows[r][c].Trim() : "";
+                                        row.Cells.Add(new TableCell(new Paragraph(new Run(txt))) { Padding = new Thickness(4) });
+                                    }
+                                    trg.Rows.Add(row);
+                                }
+
+                                table.RowGroups.Add(trg);
+                                docTable.Blocks.Add(table);
+                                rtb.Document = docTable;
+
+                                panel.Children.Add(rtb);
+
+                                if (!string.IsNullOrWhiteSpace(after))
+                                {
+                                    panel.Children.Add(new TextBlock { Text = after.Trim(), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
+                                }
+
+                                // replace body with panel
+                                grid.Children.RemoveAt(1);
+                                grid.Children.Add(panel);
+                                Grid.SetRow(panel, 1);
+
+                                converted++;
+                            }
+                        }
+                    }
+                    catch (Exception exItem)
+                    {
+                        DebugLogger.LogException(exItem, "ReparseHistory per-item error");
+                        // continue with next
+                    }
+                }
+
+                MessageBox.Show($"再解析が完了しました。変換されたメッセージ: {converted} 件", "再解析完了");
+            }
+            catch (Exception ex)
+            {
+                DebugLogger.LogException(ex, "ReparseHistory_Click error");
+                MessageBox.Show(ex.Message, "Reparse Error");
+            }
+        }
 
         public void FocusInput()
         {
@@ -978,6 +1118,83 @@ namespace ExcelChatAddin
                 sb.AppendLine(string.Join("\t", r.Select(c => c ?? "")));
             }
             return sb.ToString();
+        }
+
+        // Replace @range_ref(#Rn) placeholders with the original @range(sheet,addr) where possible for display/copy.
+        private string ReplaceRangeRefsForDisplay(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            // pattern: @range_ref(#R1)
+            var m = Regex.Matches(text, @"@range_ref\(#(?<id>R\d+)\)", RegexOptions.IgnoreCase);
+            if (m.Count == 0) return text;
+
+            var result = text;
+            foreach (Match mm in m)
+            {
+                var id = mm.Groups["id"].Value;
+                // find mapping entry in our _rangeRefMap by value
+                var kv = _rangeRefMap.FirstOrDefault(k => string.Equals(k.Value, id, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrEmpty(kv.Key))
+                {
+                    // kv.Key is like "Sheet1!A1:B2" -> make @range(Sheet1,A1:B2)
+                    var parts = kv.Key.Split('!');
+                    if (parts.Length >= 1)
+                    {
+                        var sheet = parts[0];
+                        var addr = parts.Length > 1 ? parts[1] : "";
+                        var display = $"@range({sheet},{addr})";
+                        result = result.Replace(mm.Value, display);
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        // Build copyable text: try to extract first contiguous table block (Markdown or TSV) and return TSV for Excel paste.
+        // If no table block found, return the original text.
+        private string BuildCopyText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return text;
+
+            // Try to find a Markdown table block
+            var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.None);
+
+            // find contiguous pipe-containing lines
+            var tableLines = new List<string>();
+            int start = -1;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].Contains("|"))
+                {
+                    if (start == -1) start = i;
+                    tableLines.Add(lines[i]);
+                }
+                else
+                {
+                    if (start != -1) break; // only take first block
+                }
+            }
+
+            if (tableLines.Count >= 2)
+            {
+                var block = string.Join("\n", tableLines);
+                if (TryParseMarkdownTable(block, out var rows))
+                {
+                    return RowsToTsv(rows);
+                }
+            }
+
+            // fallback: try to find TSV lines
+            var tsvLines = lines.Where(l => l.Contains('\t')).ToList();
+            if (tsvLines.Count > 0)
+            {
+                return string.Join("\r\n", tsvLines);
+            }
+
+            // no table found: return original text
+            return text;
         }
 
         // Convert TSV (tab-separated) text into a Markdown table string.
