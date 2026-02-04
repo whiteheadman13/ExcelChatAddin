@@ -36,7 +36,8 @@ namespace ExcelChatAddin
         {
             _elementHost = new ElementHost();
             _elementHost.Dock = DockStyle.Fill;
-            _elementHost.TabStop = true; // ★フォーカスが入りやすくなる
+            // Do not make the ElementHost a tab stop to avoid focus being stolen from Excel edit mode
+            _elementHost.TabStop = false;
 
             _chatView = new ChatView();
             _chatView.SetHost(this);

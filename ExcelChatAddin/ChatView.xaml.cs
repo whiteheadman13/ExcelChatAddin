@@ -774,11 +774,22 @@ namespace ExcelChatAddin
                 return;
             }
 
-            AppendTextCore(text);
+            // Ensure append runs on the WPF dispatcher to avoid cross-thread/race with Excel focus.
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => AppendTextCore(text));
+            }
+            else
+            {
+                AppendTextCore(text);
+            }
         }
 
         private void AppendTextCore(string text)
         {
+            // Make sure the input box has focus first so Excel (especially an edited cell) does not receive input.
+            try { FocusInput(); } catch { }
+
             // 末尾に追記
             if (!string.IsNullOrEmpty(InputBox.Text))
                 InputBox.AppendText(Environment.NewLine);
@@ -787,7 +798,6 @@ namespace ExcelChatAddin
             InputBox.CaretIndex = InputBox.Text.Length;
 
             RenderPreview();
-            FocusInput();
         }
 
         // 既存：入力変更でプレビュー更新

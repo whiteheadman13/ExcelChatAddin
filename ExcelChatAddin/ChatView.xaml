@@ -56,31 +56,33 @@
         <!-- ============================= -->
         <!-- マスキング操作（入力欄の上：右寄せ） -->
         <!-- ============================= -->
-        <StackPanel Grid.Row="2"
-                    Orientation="Horizontal"
-                    HorizontalAlignment="Right"
-                    Margin="0,0,0,4">
+        <Grid Grid.Row="2" Margin="0,0,0,4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-            <Button Content="クリア入力" Width="80" Height="28" Click="ClearInput_Click" ToolTip="入力欄をクリア"/>
-            <StackPanel Orientation="Vertical" HorizontalAlignment="Right" Margin="0,0,8,0">
-                <CheckBox x:Name="chkRequestTable" Content="表形式で回答" Checked="ChkRequestTable_Checked" Unchecked="ChkRequestTable_Unchecked" Margin="0,0,0,4"/>
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                    <ComboBox x:Name="cmbModel" Width="140" SelectionChanged="CmbModel_SelectionChanged">
-                        <ComboBoxItem Tag="gemini-2.5-flash">gemini-2.5-flash</ComboBoxItem>
-                        <ComboBoxItem Tag="gemini-2.5-pro">gemini-2.5-pro</ComboBoxItem>
-                        <ComboBoxItem Tag="gemini-3-flash">gemini-3-flash-preview</ComboBoxItem>
-                        <ComboBoxItem Tag="gemini-3-pro">gemini-3-pro</ComboBoxItem>
-                    </ComboBox>
+            <!-- 左側: クリアボタン -->
+            <Button Grid.Column="0" Content="クリア" Width="80" Height="28" Click="ClearInput_Click" ToolTip="入力欄をクリア" HorizontalAlignment="Left"/>
+
+            <!-- 右側: オプション群 -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                <StackPanel Orientation="Vertical" HorizontalAlignment="Right" Margin="0,0,8,0">
+                    <CheckBox x:Name="chkRequestTable" Content="表形式で回答" Checked="ChkRequestTable_Checked" Unchecked="ChkRequestTable_Unchecked" Margin="0,0,0,4" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <ComboBox x:Name="cmbModel" Width="140" SelectionChanged="CmbModel_SelectionChanged">
+                            <ComboBoxItem Tag="gemini-2.5-flash">gemini-2.5-flash</ComboBoxItem>
+                            <ComboBoxItem Tag="gemini-2.5-pro">gemini-2.5-pro</ComboBoxItem>
+                            <ComboBoxItem Tag="gemini-3-flash">gemini-3-flash-preview</ComboBoxItem>
+                            <ComboBoxItem Tag="gemini-3-pro">gemini-3-pro</ComboBoxItem>
+                        </ComboBox>
+                    </StackPanel>
                 </StackPanel>
+
+                <Button Content="👁" Width="36" Height="28" ToolTip="入力内容のマスキング確認" Click="BtnMaskPreview_Click"/>
+                <Button Content="送信プレビュー" Margin="6,0,0,0" Height="28" Click="BtnSendPreview_Click"/>
             </StackPanel>
- 
-            <Button Content="👁"
-                    Width="36"
-                    Height="28"
-                    ToolTip="入力内容のマスキング確認"
-                    Click="BtnMaskPreview_Click"/>
-            <Button Content="送信プレビュー" Margin="6,0,0,0" Height="28" Click="BtnSendPreview_Click"/>
-        </StackPanel>
+        </Grid>
 
         <!-- ============================= -->
         <!-- マスキングプレビュー（表示専用） -->
