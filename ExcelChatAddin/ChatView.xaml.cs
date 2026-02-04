@@ -20,6 +20,8 @@ namespace ExcelChatAddin
         // すでに LLM に送付済みの参照 ID（#R1 等）
         private readonly HashSet<string> _refsSent = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // (範囲はチャット履歴と入力欄に出ているものだけを送る設計)
+        // 履歴/入力クリア後に Selection を自動で送らないようにするフラグ
+        private bool _suppressSelectionFallback = false;
 
         // ★まだUIが生成されていないタイミングで AppendText された分を溜める
         private readonly List<string> _pendingAppends = new List<string>();
@@ -302,7 +304,8 @@ namespace ExcelChatAddin
                 _rangeRefMap.Clear();
                 _nextRangeId = 1;
                 _refsSent.Clear();
-                // 履歴クリア時に参照マップはクリア済みのため、以降はチャット履歴/入力に現れる範囲のみ送付されます
+                // 履歴をクリアしたら、選択フェールバック（Selection/ActiveCell による補完）も抑止する
+                _suppressSelectionFallback = true;
             }
             catch { }
         }
@@ -312,6 +315,8 @@ namespace ExcelChatAddin
             try
             {
                 InputBox.Clear();
+                // 入力をクリアしたので選択フェールバックは抑止しておく
+                _suppressSelectionFallback = true;
                 RenderPreview();
                 FocusInput();
             }
@@ -470,9 +475,9 @@ namespace ExcelChatAddin
             sb.AppendLine(MaskingEngine.Instance.Mask(bodyWithRefs));
             sb.AppendLine();
 
-            // 4) target range: refer to ref if possible
+            // 4) target range: only include if it appears among referenced keys (i.e. present in chat history or input)
             sb.AppendLine("【対象範囲】");
-            if (!string.IsNullOrWhiteSpace(rangeLabel) && rangeLabel != "(なし)")
+            if (!string.IsNullOrWhiteSpace(rangeLabel) && rangeLabel != "(なし)" && referencedKeys.Exists(x => string.Equals(x, rangeLabel, StringComparison.OrdinalIgnoreCase)))
             {
                 if (workingMap.TryGetValue(rangeLabel, out var rr))
                 {
