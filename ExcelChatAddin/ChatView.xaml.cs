@@ -107,6 +107,16 @@ namespace ExcelChatAddin
                 Dispatcher.Invoke(() =>
                 {
                     AppendChat("You", shown);
+
+                    // 送信したので入力欄をクリアしてプレビュー更新
+                    try
+                    {
+                        InputBox.Clear();
+                        RenderPreview();
+                        FocusInput();
+                    }
+                    catch { }
+
                     btnSendGemini.IsEnabled = false;
                 });
 
