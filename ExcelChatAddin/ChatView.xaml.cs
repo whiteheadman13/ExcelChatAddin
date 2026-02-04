@@ -76,14 +76,14 @@ namespace ExcelChatAddin
                 // ★ ① 入力欄の @range(...) を優先して解決
                 Excel.Range rng = TryResolveRangeFromText(app, raw);
 
-                // ★ ② 無ければ Selection から取得（従来のやり方）
-                if (rng == null)
+                // ユーザが入力欄を空で送信した場合にのみ Selection / ActiveCell を参照する。
+                // これにより、入力から @range を削除した後に以前の選択範囲が誤って送信されるのを防ぐ。
+                if (rng == null && string.IsNullOrWhiteSpace(raw))
                 {
                     try { rng = app.Selection as Excel.Range; } catch { rng = null; }
                 }
 
-                // ★ ③ さらに無ければ ActiveCell（任意の保険）
-                if (rng == null)
+                if (rng == null && string.IsNullOrWhiteSpace(raw))
                 {
                     try { rng = app.ActiveCell as Excel.Range; } catch { rng = null; }
                 }
