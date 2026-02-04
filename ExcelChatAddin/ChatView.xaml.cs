@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using Excel = Microsoft.Office.Interop.Excel;
 
 namespace ExcelChatAddin
@@ -243,6 +244,25 @@ namespace ExcelChatAddin
             // Loaded前は触らない（null事故回避）
             if (!IsLoaded) return;
             RenderPreview();
+        }
+
+        // Enter: 改行を挿入、Ctrl+Enter: 送信
+        private void InputBox_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter)
+            {
+                if ((Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+                {
+                    // Ctrl+Enter -> 送信
+                    e.Handled = true; // 既定の改行を抑止
+                    btnSendGemini_Click(btnSendGemini, new RoutedEventArgs());
+                }
+                else
+                {
+                    // Enter -> 改行を許可（TextBox は AcceptsReturn=true のためそのままでよい）
+                    // 何もしない
+                }
+            }
         }
 
         // ★追加：マスキング確認ボタン

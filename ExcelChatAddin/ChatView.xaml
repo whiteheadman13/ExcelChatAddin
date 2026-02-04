@@ -80,6 +80,7 @@
             <TextBox x:Name="InputBox"
                      Grid.Column="0"
                      AcceptsReturn="True"
+                     PreviewKeyDown="InputBox_PreviewKeyDown"
                      TextWrapping="Wrap"
                      VerticalScrollBarVisibility="Auto"
                      BorderThickness="1"
