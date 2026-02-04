@@ -29,17 +29,17 @@
         <!-- ============================= -->
         <!-- チャット履歴（表示専用） -->
         <!-- ============================= -->
-        <TextBox x:Name="ChatHistoryBox"
-                 Grid.Row="1"
-                 Margin="0,0,0,6"
-                 IsReadOnly="True"
-                 AcceptsReturn="True"
-                 TextWrapping="Wrap"
-                 VerticalScrollBarVisibility="Auto"
-                 Background="#FFF8F8F8"
-                 BorderBrush="#FFCCCCCC"
-                 BorderThickness="1"
-                 Padding="6"/>
+        <Border Grid.Row="1"
+                Margin="0,0,0,6"
+                Background="#FFF8F8F8"
+                BorderBrush="#FFCCCCCC"
+                BorderThickness="1"
+                Padding="6">
+            <ScrollViewer x:Name="ChatHistoryScroll"
+                          VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="ChatHistoryPanel"/>
+            </ScrollViewer>
+        </Border>
 
         <!-- ============================= -->
         <!-- マスキング操作（入力欄の上：右寄せ） -->

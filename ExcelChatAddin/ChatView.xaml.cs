@@ -200,8 +200,73 @@ namespace ExcelChatAddin
                 return;
             }
 
-            ChatHistoryBox.AppendText($"[{role}]\n{text}\n\n");
-            ChatHistoryBox.ScrollToEnd();
+            // Create a message container with a small copy button at the top-right
+            var container = new Border
+            {
+                Background = System.Windows.Media.Brushes.White,
+                BorderBrush = System.Windows.Media.Brushes.LightGray,
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(6),
+                Margin = new Thickness(0, 0, 0, 6)
+            };
+
+            var grid = new Grid();
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+            // Header: role + copy button
+            var headerPanel = new DockPanel();
+
+            var roleText = new TextBlock
+            {
+                Text = $"[{role}]",
+                FontWeight = FontWeights.Bold,
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            DockPanel.SetDock(roleText, Dock.Left);
+            headerPanel.Children.Add(roleText);
+
+            var copyBtn = new Button
+            {
+                Content = "コピー",
+                Width = 56,
+                Height = 22,
+                FontSize = 12,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(6, 0, 0, 0)
+            };
+            copyBtn.Click += (_, __) =>
+            {
+                try { Clipboard.SetText(text ?? ""); }
+                catch { }
+            };
+            DockPanel.SetDock(copyBtn, Dock.Right);
+            headerPanel.Children.Add(copyBtn);
+
+            grid.Children.Add(headerPanel);
+            Grid.SetRow(headerPanel, 0);
+
+            var bodyText = new TextBlock
+            {
+                Text = text ?? "",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 6, 0, 0)
+            };
+            grid.Children.Add(bodyText);
+            Grid.SetRow(bodyText, 1);
+
+            container.Child = grid;
+
+            ChatHistoryPanel.Children.Add(container);
+
+            // Scroll to bottom
+            try
+            {
+                ChatHistoryScroll?.ScrollToVerticalOffset(ChatHistoryScroll.ExtentHeight);
+            }
+            catch { }
         }
 
 
