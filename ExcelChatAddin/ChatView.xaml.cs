@@ -115,9 +115,12 @@ namespace ExcelChatAddin
                 var client = new GeminiClient();
                 var response = await client.SendAsync(masked);
 
+                // 受信したレスポンスをアンマスクしてから表示する
+                var unmaskedResponse = MaskingEngine.Instance.Unmask(response);
+
                 Dispatcher.Invoke(() =>
                 {
-                    AppendChat("Gemini", response);
+                    AppendChat("Gemini", unmaskedResponse);
                     btnSendGemini.IsEnabled = true;
                 });
             }
