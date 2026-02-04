@@ -500,7 +500,17 @@ namespace ExcelChatAddin
                     // fetch actual range text
                     string[] parts = t.key.Split('!');
                     string rt = _host?.GetRangeText(parts[0], parts.Length > 1 ? parts[1] : "") ?? "";
-                    sb.AppendLine(MaskingEngine.Instance.Mask(rt));
+                    // Convert range text (TSV) to a Markdown table with cell-level masking so LLM receives structured table data
+                    try
+                    {
+                        var md = TsvToMarkdownTable(rt);
+                        sb.AppendLine(md);
+                    }
+                    catch
+                    {
+                        // fallback to masked raw text
+                        sb.AppendLine(MaskingEngine.Instance.Mask(rt));
+                    }
                     sb.AppendLine();
                 }
             }
@@ -967,6 +977,56 @@ namespace ExcelChatAddin
             {
                 sb.AppendLine(string.Join("\t", r.Select(c => c ?? "")));
             }
+            return sb.ToString();
+        }
+
+        // Convert TSV (tab-separated) text into a Markdown table string.
+        // Applies MaskingEngine.Instance.Mask to each cell to preserve masking rules.
+        private string TsvToMarkdownTable(string tsv)
+        {
+            if (string.IsNullOrWhiteSpace(tsv)) return "(空の範囲)";
+
+            var lines = tsv.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var rows = lines.Select(l => l.Split('\t')).ToList();
+            if (rows.Count == 0) return "(空の範囲)";
+
+            // determine column count
+            int cols = rows.Max(r => r.Length);
+
+            // build header placeholder if single-column or no header available
+            var sb = new StringBuilder();
+
+            // If first row looks like header (no numeric-only and contains non-empty), use it; otherwise generate H1..Hn
+            bool firstIsHeader = rows[0].Any(c => !string.IsNullOrWhiteSpace(c)) && rows.Count > 1;
+
+            string[] header = new string[cols];
+            if (firstIsHeader)
+            {
+                for (int c = 0; c < cols; c++) header[c] = c < rows[0].Length ? MaskingEngine.Instance.Mask(rows[0][c] ?? "") : "";
+                // body starts from row 1
+                sb.AppendLine("| " + string.Join(" | ", header) + " |");
+                sb.AppendLine("|" + string.Join("|", Enumerable.Range(0, cols).Select(_ => " --- ")) + "|");
+                for (int r = 1; r < rows.Count; r++)
+                {
+                    var cells = new string[cols];
+                    for (int c = 0; c < cols; c++) cells[c] = c < rows[r].Length ? MaskingEngine.Instance.Mask(rows[r][c] ?? "") : "";
+                    sb.AppendLine("| " + string.Join(" | ", cells) + " |");
+                }
+            }
+            else
+            {
+                // generate headers H1..Hn
+                for (int c = 0; c < cols; c++) header[c] = "Col" + (c + 1);
+                sb.AppendLine("| " + string.Join(" | ", header) + " |");
+                sb.AppendLine("|" + string.Join("|", Enumerable.Range(0, cols).Select(_ => " --- ")) + "|");
+                for (int r = 0; r < rows.Count; r++)
+                {
+                    var cells = new string[cols];
+                    for (int c = 0; c < cols; c++) cells[c] = c < rows[r].Length ? MaskingEngine.Instance.Mask(rows[r][c] ?? "") : "";
+                    sb.AppendLine("| " + string.Join(" | ", cells) + " |");
+                }
+            }
+
             return sb.ToString();
         }
     }
