@@ -56,6 +56,236 @@ namespace ExcelChatAddin
                 return null;
             }
         }
+
+        // Try to parse a Markdown-style table (or TSV) from text.
+        // Returns rows as array of string[] with header at [0].
+        private bool TryParseMarkdownTable(string text, out List<string[]> rows)
+        {
+            rows = null;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => l.Trim()).ToList();
+            if (lines.Count < 2) return false;
+
+            // 1) Standard Markdown with separator line (|---|---|)
+            if (lines[0].Contains("|") && lines.Count >= 2 && Regex.IsMatch(lines[1], @"^[\|\s:\-]+$"))
+            {
+                try
+                {
+                    rows = new List<string[]>();
+                    foreach (var ln in lines)
+                    {
+                        if (!ln.Contains("|")) break;
+                        var parts = ln.Split('|').Select(p => p.Trim()).ToArray();
+                        // remove empty leading/trailing if split produced them
+                        if (parts.Length > 0 && string.IsNullOrEmpty(parts[0])) parts = parts.Skip(1).ToArray();
+                        if (parts.Length > 0 && string.IsNullOrEmpty(parts.Last())) parts = parts.Take(parts.Length - 1).ToArray();
+                        rows.Add(parts);
+                    }
+
+                    // drop separator row if present (contains only - or :)
+                    if (rows.Count >= 2 && rows[1].All(s => Regex.IsMatch(s, "^[:\\-]+$")))
+                    {
+                        rows.RemoveAt(1);
+                    }
+
+                    return rows.Count >= 1;
+                }
+                catch { return false; }
+            }
+
+            // 2) Simple pipe table without separator (header and following rows with pipes)
+            if (lines[0].Contains("|") && lines.Skip(1).Any(l => l.Contains("|")))
+            {
+                try
+                {
+                    // take consecutive pipe-containing lines from the start
+                    var tableLines = new List<string>();
+                    foreach (var ln in lines)
+                    {
+                        if (string.IsNullOrWhiteSpace(ln)) break;
+                        if (!ln.Contains("|")) break;
+                        tableLines.Add(ln);
+                    }
+
+                    if (tableLines.Count < 2) return false;
+
+                    rows = new List<string[]>();
+                    int maxCols = 0;
+                    foreach (var ln in tableLines)
+                    {
+                        var parts = ln.Split('|').Select(p => p.Trim()).ToArray();
+                        // remove empty leading/trailing if split produced them
+                        if (parts.Length > 0 && string.IsNullOrEmpty(parts[0])) parts = parts.Skip(1).ToArray();
+                        if (parts.Length > 0 && string.IsNullOrEmpty(parts.Last())) parts = parts.Take(parts.Length - 1).ToArray();
+                        rows.Add(parts);
+                        if (parts.Length > maxCols) maxCols = parts.Length;
+                    }
+
+                    // normalize row lengths
+                    for (int i = 0; i < rows.Count; i++)
+                    {
+                        if (rows[i].Length < maxCols)
+                        {
+                            var a = new string[maxCols];
+                            for (int j = 0; j < maxCols; j++) a[j] = j < rows[i].Length ? rows[i][j] : "";
+                            rows[i] = a;
+                        }
+                    }
+
+                    return rows.Count >= 1;
+                }
+                catch { return false; }
+            }
+
+            // Fallback: TSV detection (tab separated with multiple columns)
+            var toks = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            if (toks.Length >= 1 && toks.Any(t => t.Contains('\t')))
+            {
+                rows = toks.Select(t => t.Split('\t')).ToList();
+                return rows.Count >= 1 && rows[0].Length > 1;
+            }
+
+            return false;
+        }
+
+        private string RowsToTsv(List<string[]> rows)
+        {
+            var sb = new StringBuilder();
+            foreach (var r in rows)
+            {
+                sb.AppendLine(string.Join("\t", r.Select(c => c ?? "")));
+            }
+            return sb.ToString();
+        }
+
+        // Replace @range_ref(#Rn) placeholders with the original @range(sheet,addr) where possible for display/copy.
+        private string ReplaceRangeRefsForDisplay(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            // pattern: @range_ref(#R1)
+            var m = Regex.Matches(text, @"@range_ref\(#(?<id>R\d+)\)", RegexOptions.IgnoreCase);
+            if (m.Count == 0) return text;
+
+            var result = text;
+            foreach (Match mm in m)
+            {
+                var id = mm.Groups["id"].Value;
+                // find mapping entry in our _rangeRefMap by value
+                var kv = _rangeRefMap.FirstOrDefault(k => string.Equals(k.Value, id, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrEmpty(kv.Key))
+                {
+                    // kv.Key is like "Sheet1!A1:B2" -> make @range(Sheet1,A1:B2)
+                    var parts = kv.Key.Split('!');
+                    if (parts.Length >= 1)
+                    {
+                        var sheet = parts[0];
+                        var addr = parts.Length > 1 ? parts[1] : "";
+                        var display = $"@range({sheet},{addr})";
+                        result = result.Replace(mm.Value, display);
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        // Build copyable text: try to extract first contiguous table block (Markdown or TSV) and return TSV for Excel paste.
+        // If no table block found, return the original text.
+        private string BuildCopyText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return text;
+
+            // Try to find a Markdown table block
+            var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.None);
+
+            // find contiguous pipe-containing lines
+            var tableLines = new List<string>();
+            int start = -1;
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].Contains("|"))
+                {
+                    if (start == -1) start = i;
+                    tableLines.Add(lines[i]);
+                }
+                else
+                {
+                    if (start != -1) break; // only take first block
+                }
+            }
+
+            if (tableLines.Count >= 2)
+            {
+                var block = string.Join("\n", tableLines);
+                if (TryParseMarkdownTable(block, out var rows))
+                {
+                    return RowsToTsv(rows);
+                }
+            }
+
+            // fallback: try to find TSV lines
+            var tsvLines = lines.Where(l => l.Contains('\t')).ToList();
+            if (tsvLines.Count > 0)
+            {
+                return string.Join("\r\n", tsvLines);
+            }
+
+            // no table found: return original text
+            return text;
+        }
+
+        // Convert TSV (tab-separated) text into a Markdown table string.
+        // Applies MaskingEngine.Instance.Mask to each cell to preserve masking rules.
+        private string TsvToMarkdownTable(string tsv)
+        {
+            if (string.IsNullOrWhiteSpace(tsv)) return "(空の範囲)";
+
+            var lines = tsv.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var rows = lines.Select(l => l.Split('\t')).ToList();
+            if (rows.Count == 0) return "(空の範囲)";
+
+            // determine column count
+            int cols = rows.Max(r => r.Length);
+
+            // build header placeholder if single-column or no header available
+            var sb = new StringBuilder();
+
+            // If first row looks like header (no numeric-only and contains non-empty), use it; otherwise generate H1..Hn
+            bool firstIsHeader = rows[0].Any(c => !string.IsNullOrWhiteSpace(c)) && rows.Count > 1;
+
+            string[] header = new string[cols];
+            if (firstIsHeader)
+            {
+                for (int c = 0; c < cols; c++) header[c] = c < rows[0].Length ? MaskingEngine.Instance.Mask(rows[0][c] ?? "") : "";
+                // body starts from row 1
+                sb.AppendLine("| " + string.Join(" | ", header) + " |");
+                sb.AppendLine("|" + string.Join("|", Enumerable.Range(0, cols).Select(_ => " --- ")) + "|");
+                for (int r = 1; r < rows.Count; r++)
+                {
+                    var cells = new string[cols];
+                    for (int c = 0; c < cols; c++) cells[c] = c < rows[r].Length ? MaskingEngine.Instance.Mask(rows[r][c] ?? "") : "";
+                    sb.AppendLine("| " + string.Join(" | ", cells) + " |");
+                }
+            }
+            else
+            {
+                // generate headers H1..Hn
+                for (int c = 0; c < cols; c++) header[c] = "Col" + (c + 1);
+                sb.AppendLine("| " + string.Join(" | ", header) + " |");
+                sb.AppendLine("|" + string.Join("|", Enumerable.Range(0, cols).Select(_ => " --- ")) + "|");
+                for (int r = 0; r < rows.Count; r++)
+                {
+                    var cells = new string[cols];
+                    for (int c = 0; c < cols; c++) cells[c] = c < rows[r].Length ? MaskingEngine.Instance.Mask(rows[r][c] ?? "") : "";
+                    sb.AppendLine("| " + string.Join(" | ", cells) + " |");
+                }
+            }
+
+            return sb.ToString();
+        }
         public ChatView()
         {
             InitializeComponent();
@@ -1048,234 +1278,46 @@ namespace ExcelChatAddin
             catch { }
         }
 
-        // Try to parse a Markdown-style table (or TSV) from text.
-        // Returns rows as array of string[] with header at [0].
-        private bool TryParseMarkdownTable(string text, out List<string[]> rows)
+        // テンプレートボタン: 一覧表示 → 選択で入力欄に挿入、または 新規/編集
+        private void BtnTemplate_Click(object sender, RoutedEventArgs e)
         {
-            rows = null;
-            if (string.IsNullOrWhiteSpace(text)) return false;
-
-            var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(l => l.Trim()).ToList();
-            if (lines.Count < 2) return false;
-
-            // 1) Standard Markdown with separator line (|---|---|)
-            if (lines[0].Contains("|") && lines.Count >= 2 && Regex.IsMatch(lines[1], @"^[\|\s:\-]+$"))
+            try
             {
-                try
+                System.Windows.Forms.IWin32Window owner = null;
+                if (_host != null && _host.ExcelHwnd != IntPtr.Zero)
+                    owner = new Win32Window(_host.ExcelHwnd);
+
+                using (var dlg = new TemplateDialog())
                 {
-                    rows = new List<string[]>();
-                    foreach (var ln in lines)
+                    var res = owner != null ? dlg.ShowDialog(owner) : dlg.ShowDialog();
+                    if (res != System.Windows.Forms.DialogResult.OK) return;
+
+                    var tmpl = dlg.SelectedTemplate;
+                    if (tmpl == null) return;
+
+                    // insert body at caret position
+                    if (InputBox == null) return;
+                    int start = InputBox.SelectionStart;
+                    if (!string.IsNullOrEmpty(InputBox.Text) && start < InputBox.Text.Length)
                     {
-                        if (!ln.Contains("|")) break;
-                        var parts = ln.Split('|').Select(p => p.Trim()).ToArray();
-                        // remove empty leading/trailing if split produced them
-                        if (parts.Length > 0 && string.IsNullOrEmpty(parts[0])) parts = parts.Skip(1).ToArray();
-                        if (parts.Length > 0 && string.IsNullOrEmpty(parts.Last())) parts = parts.Take(parts.Length - 1).ToArray();
-                        rows.Add(parts);
+                        InputBox.Text = InputBox.Text.Insert(start, tmpl.Body);
+                        InputBox.SelectionStart = start + tmpl.Body.Length;
+                    }
+                    else
+                    {
+                        if (!string.IsNullOrEmpty(InputBox.Text)) InputBox.AppendText(Environment.NewLine);
+                        InputBox.AppendText(tmpl.Body);
+                        InputBox.SelectionStart = InputBox.Text.Length;
                     }
 
-                    // drop separator row if present (contains only - or :)
-                    if (rows.Count >= 2 && rows[1].All(s => Regex.IsMatch(s, @"^[:\-]+$")))
-                    {
-                        rows.RemoveAt(1);
-                    }
-
-                    return rows.Count >= 1;
-                }
-                catch { return false; }
-            }
-
-            // 2) Simple pipe table without separator (header and following rows with pipes)
-            if (lines[0].Contains("|") && lines.Skip(1).Any(l => l.Contains("|")))
-            {
-                try
-                {
-                    // take consecutive pipe-containing lines from the start
-                    var tableLines = new List<string>();
-                    foreach (var ln in lines)
-                    {
-                        if (string.IsNullOrWhiteSpace(ln)) break;
-                        if (!ln.Contains("|")) break;
-                        tableLines.Add(ln);
-                    }
-
-                    if (tableLines.Count < 2) return false;
-
-                    rows = new List<string[]>();
-                    int maxCols = 0;
-                    foreach (var ln in tableLines)
-                    {
-                        var parts = ln.Split('|').Select(p => p.Trim()).ToArray();
-                        // remove empty leading/trailing if split produced them
-                        if (parts.Length > 0 && string.IsNullOrEmpty(parts[0])) parts = parts.Skip(1).ToArray();
-                        if (parts.Length > 0 && string.IsNullOrEmpty(parts.Last())) parts = parts.Take(parts.Length - 1).ToArray();
-                        rows.Add(parts);
-                        if (parts.Length > maxCols) maxCols = parts.Length;
-                    }
-
-                    // normalize row lengths
-                    for (int i = 0; i < rows.Count; i++)
-                    {
-                        if (rows[i].Length < maxCols)
-                        {
-                            var a = new string[maxCols];
-                            for (int j = 0; j < maxCols; j++) a[j] = j < rows[i].Length ? rows[i][j] : "";
-                            rows[i] = a;
-                        }
-                    }
-
-                    return rows.Count >= 1;
-                }
-                catch { return false; }
-            }
-
-            // Fallback: TSV detection (tab separated with multiple columns)
-            var toks = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            if (toks.Length >= 1 && toks.Any(t => t.Contains('\t')))
-            {
-                rows = toks.Select(t => t.Split('\t')).ToList();
-                return rows.Count >= 1 && rows[0].Length > 1;
-            }
-
-            return false;
-        }
-
-        private string RowsToTsv(List<string[]> rows)
-        {
-            var sb = new StringBuilder();
-            foreach (var r in rows)
-            {
-                sb.AppendLine(string.Join("\t", r.Select(c => c ?? "")));
-            }
-            return sb.ToString();
-        }
-
-        // Replace @range_ref(#Rn) placeholders with the original @range(sheet,addr) where possible for display/copy.
-        private string ReplaceRangeRefsForDisplay(string text)
-        {
-            if (string.IsNullOrEmpty(text)) return text;
-
-            // pattern: @range_ref(#R1)
-            var m = Regex.Matches(text, @"@range_ref\(#(?<id>R\d+)\)", RegexOptions.IgnoreCase);
-            if (m.Count == 0) return text;
-
-            var result = text;
-            foreach (Match mm in m)
-            {
-                var id = mm.Groups["id"].Value;
-                // find mapping entry in our _rangeRefMap by value
-                var kv = _rangeRefMap.FirstOrDefault(k => string.Equals(k.Value, id, StringComparison.OrdinalIgnoreCase));
-                if (!string.IsNullOrEmpty(kv.Key))
-                {
-                    // kv.Key is like "Sheet1!A1:B2" -> make @range(Sheet1,A1:B2)
-                    var parts = kv.Key.Split('!');
-                    if (parts.Length >= 1)
-                    {
-                        var sheet = parts[0];
-                        var addr = parts.Length > 1 ? parts[1] : "";
-                        var display = $"@range({sheet},{addr})";
-                        result = result.Replace(mm.Value, display);
-                    }
+                    RenderPreview();
+                    FocusInput();
                 }
             }
-
-            return result;
-        }
-
-        // Build copyable text: try to extract first contiguous table block (Markdown or TSV) and return TSV for Excel paste.
-        // If no table block found, return the original text.
-        private string BuildCopyText(string text)
-        {
-            if (string.IsNullOrWhiteSpace(text)) return text;
-
-            // Try to find a Markdown table block
-            var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.None);
-
-            // find contiguous pipe-containing lines
-            var tableLines = new List<string>();
-            int start = -1;
-            for (int i = 0; i < lines.Length; i++)
+            catch (Exception ex)
             {
-                if (lines[i].Contains("|"))
-                {
-                    if (start == -1) start = i;
-                    tableLines.Add(lines[i]);
-                }
-                else
-                {
-                    if (start != -1) break; // only take first block
-                }
+                MessageBox.Show(ex.Message, "テンプレート");
             }
-
-            if (tableLines.Count >= 2)
-            {
-                var block = string.Join("\n", tableLines);
-                if (TryParseMarkdownTable(block, out var rows))
-                {
-                    return RowsToTsv(rows);
-                }
-            }
-
-            // fallback: try to find TSV lines
-            var tsvLines = lines.Where(l => l.Contains('\t')).ToList();
-            if (tsvLines.Count > 0)
-            {
-                return string.Join("\r\n", tsvLines);
-            }
-
-            // no table found: return original text
-            return text;
-        }
-
-        // Convert TSV (tab-separated) text into a Markdown table string.
-        // Applies MaskingEngine.Instance.Mask to each cell to preserve masking rules.
-        private string TsvToMarkdownTable(string tsv)
-        {
-            if (string.IsNullOrWhiteSpace(tsv)) return "(空の範囲)";
-
-            var lines = tsv.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            var rows = lines.Select(l => l.Split('\t')).ToList();
-            if (rows.Count == 0) return "(空の範囲)";
-
-            // determine column count
-            int cols = rows.Max(r => r.Length);
-
-            // build header placeholder if single-column or no header available
-            var sb = new StringBuilder();
-
-            // If first row looks like header (no numeric-only and contains non-empty), use it; otherwise generate H1..Hn
-            bool firstIsHeader = rows[0].Any(c => !string.IsNullOrWhiteSpace(c)) && rows.Count > 1;
-
-            string[] header = new string[cols];
-            if (firstIsHeader)
-            {
-                for (int c = 0; c < cols; c++) header[c] = c < rows[0].Length ? MaskingEngine.Instance.Mask(rows[0][c] ?? "") : "";
-                // body starts from row 1
-                sb.AppendLine("| " + string.Join(" | ", header) + " |");
-                sb.AppendLine("|" + string.Join("|", Enumerable.Range(0, cols).Select(_ => " --- ")) + "|");
-                for (int r = 1; r < rows.Count; r++)
-                {
-                    var cells = new string[cols];
-                    for (int c = 0; c < cols; c++) cells[c] = c < rows[r].Length ? MaskingEngine.Instance.Mask(rows[r][c] ?? "") : "";
-                    sb.AppendLine("| " + string.Join(" | ", cells) + " |");
-                }
-            }
-            else
-            {
-                // generate headers H1..Hn
-                for (int c = 0; c < cols; c++) header[c] = "Col" + (c + 1);
-                sb.AppendLine("| " + string.Join(" | ", header) + " |");
-                sb.AppendLine("|" + string.Join("|", Enumerable.Range(0, cols).Select(_ => " --- ")) + "|");
-                for (int r = 0; r < rows.Count; r++)
-                {
-                    var cells = new string[cols];
-                    for (int c = 0; c < cols; c++) cells[c] = c < rows[r].Length ? MaskingEngine.Instance.Mask(rows[r][c] ?? "") : "";
-                    sb.AppendLine("| " + string.Join(" | ", cells) + " |");
-                }
-            }
-
-            return sb.ToString();
         }
     }
 }

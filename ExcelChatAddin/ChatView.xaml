@@ -35,7 +35,7 @@
                 <!-- removed: 表形式で表示 (use input-area checkbox instead) -->
                 <Button Content="クリア履歴" Width="80" Height="24" Click="ClearHistory_Click" ToolTip="チャット履歴をクリア" Margin="0,0,6,0"/>
                 <Button Content="再解析" Width="80" Height="24" Click="ReparseHistory_Click" ToolTip="履歴を再解析して表を検出表示" Margin="0,0,6,0"/>
-                           </StackPanel>
+            </StackPanel>
         </Grid>
 
         <!-- ============================= -->
@@ -125,14 +125,16 @@
                 </TextBox.ContextMenu>
             </TextBox>
 
-            <!-- 送信ボタン -->
-            <Button x:Name="btnSendGemini"
-                    Grid.Column="1"
-                    Content="送信"
-                    Margin="6,0,0,0"
-                    Padding="16,8"
-                    FontSize="16"
-                    Click="btnSendGemini_Click"/>
+            <!-- 送信ボタン と テンプレート -->
+            <StackPanel Grid.Column="1" Orientation="Vertical" Margin="6,0,0,0">
+                <Button Content="テンプレート" Width="100" Height="28" Click="BtnTemplate_Click" ToolTip="テンプレートを選択/編集" Margin="0,0,0,6"/>
+                <Button x:Name="btnSendGemini"
+                        Content="送信"
+                        Padding="16,8"
+                        FontSize="16"
+                        Height="36"
+                        Click="btnSendGemini_Click"/>
+            </StackPanel>
         </Grid>
 
     </Grid>
