@@ -16,7 +16,7 @@ namespace ExcelChatAddin
     {
         // 以前の "チャット上の表形式表示" は廃止。入力欄側のワンショット指定を使用します。
         private bool _requestTableForNextSend = false;
-        private string _selectedModel = "gemini-3-flash-preview";
+        private string _selectedModel = "gemini-3.1-flash-lite-preview";
 
         private TaskPaneHost _host;
         // 範囲の送信マッピング（セッション内で重複送信を避けるため）

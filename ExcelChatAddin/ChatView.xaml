@@ -71,10 +71,10 @@
                     <CheckBox x:Name="chkRequestTable" Content="表形式で回答" Checked="ChkRequestTable_Checked" Unchecked="ChkRequestTable_Unchecked" Margin="0,0,0,4" />
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                         <ComboBox x:Name="cmbModel" Width="140" SelectionChanged="CmbModel_SelectionChanged">
-                            <ComboBoxItem Tag="gemini-2.5-flash">gemini-2.5-flash</ComboBoxItem>
+                            <ComboBoxItem Tag="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview</ComboBoxItem>
+                            <ComboBoxItem Tag="gemini-3-flash-preview">gemini-3-flash-preview</ComboBoxItem>
+                            <ComboBoxItem Tag="gemini-3.1-pro-preview">gemini-3.1-pro-preview</ComboBoxItem>
                             <ComboBoxItem Tag="gemini-2.5-pro">gemini-2.5-pro</ComboBoxItem>
-                            <ComboBoxItem Tag="gemini-3-flash">gemini-3-flash-preview</ComboBoxItem>
-                            <ComboBoxItem Tag="gemini-3-pro">gemini-3-pro</ComboBoxItem>
                         </ComboBox>
                     </StackPanel>
                 </StackPanel>

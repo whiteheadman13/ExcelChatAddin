@@ -66,7 +66,7 @@ namespace ExcelChatAddin
             return key ?? "";
         }
 
-        public async Task<string> SendAsync(string maskedText, string modelName = "gemini-3-flash-preview")
+        public async Task<string> SendAsync(string maskedText, string modelName = "gemini-3.1-flash-lite-preview")
         {
             DebugLogger.LogInfo("GeminiClient.SendAsync starting");
             DebugLogger.LogInfo($"Model: {modelName}");

@@ -9,8 +9,8 @@ namespace ExcelChatAddin
         // Gemini API Key (推奨: 環境変数 GEMINI_API_KEY で管理)
         public string ApiKey { get; set; } = "";
 
-        // 例: gemini-1.5-flash, gemini-1.5-pro など
-        public string GeminiModel { get; set; } = "gemini-1.5-flash";
+        // 例: gemini-3.1-flash-lite-preview, gemini-3.1-pro-preview など
+        public string GeminiModel { get; set; } = "gemini-3.1-flash-lite-preview";
 
         // 送信時に履歴として含める最大メッセージ数（暴走防止）
         public int MaxMessagesForRequest { get; set; } = 20;
