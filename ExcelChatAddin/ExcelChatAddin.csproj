@@ -194,7 +194,8 @@
     can be found.
   -->
   <ItemGroup>
-    <Compile Include="ChatModels.cs" />`r`n    <Compile Include="ChatRibbon.cs" />
+    <Compile Include="ChatModels.cs" />
+    <Compile Include="ChatRibbon.cs" />
     <Compile Include="DebugLogger.cs" />
     <Compile Include="DictionaryManager.cs">
       <SubType>Form</SubType>

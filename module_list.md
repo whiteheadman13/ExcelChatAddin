@@ -14,7 +14,7 @@
 |---|---|---|---|
 | `ExcelChatAddin/ThisAddIn.cs` | C# | アドイン起動・終了、右クリックメニュー追加、ホットキー登録、各UI起動の中核 | Excelアドイン本体のエントリーポイント |
 | `ExcelChatAddin/ThisAddIn.Designer.cs` | C# Designer | VSTO生成コード、アドインイベント配線 | 自動生成コード |
-| `ExcelChatAddin/ChatRibbon.cs` | C# | リボン拡張用ファイル | 現状は実装が薄い/要確認 |
+| `ExcelChatAddin/ChatRibbon.cs` | C# | リボン拡張（`IRibbonExtensibility`実装）、「チャット表示」ボタン定義、クリック時に`ShowChat()`呼び出し | Excelリボンタブ「Secure Chat」 |
 | `ExcelChatAddin/TaskPaneHost.cs` | C# WinForms | カスタムタスクペインのホスト、WPF `ChatView` 埋め込み、Excel選択範囲操作 | Excel画面との橋渡し |
 | `ExcelChatAddin/TaskPaneHost.Designer.cs` | C# Designer | `TaskPaneHost` の自動生成UI | 自動生成コード |
 | `ExcelChatAddin/ChatView.xaml` | XAML | チャット画面レイアウト | WPF UI |
