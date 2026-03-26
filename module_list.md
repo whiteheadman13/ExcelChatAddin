@@ -3,6 +3,12 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (テンプレート不具合対応)
+- 事象: テンプレートファイル `diagram_templates.json` が旧形式キー（`Name`/`Prompt`）の場合、現行読み込みが `Title`/`Body` 前提のため一覧表示が崩れる。
+- 対象モジュール:
+  - `ExcelChatAddin/TemplateManager.cs`（テンプレート読込互換・正規化）
+  - `ExcelChatAddin/TemplateDialog.cs`（既存利用、読み込み結果の表示側確認）
+
 ## Project Overview
 - Project: `ExcelChatAddin/ExcelChatAddin.csproj`
 - Type: Excel VSTO Add-in (.NET Framework 4.8)
