@@ -160,12 +160,74 @@ namespace ExcelChatAddin
             return sb.ToString();
         }
 
+        private RichTextBox CreateTableRichTextBox(List<string[]> tableRows)
+        {
+            var rtb = new RichTextBox
+            {
+                IsReadOnly = true,
+                BorderThickness = new Thickness(0),
+                FontSize = 14,
+                Margin = new Thickness(0),
+                Background = System.Windows.Media.Brushes.Transparent
+            };
+
+            var docTable = new FlowDocument { PagePadding = new Thickness(0) };
+            var table = new Table();
+            int cols = tableRows[0].Length;
+            for (int i = 0; i < cols; i++) table.Columns.Add(new TableColumn());
+
+            var trg = new TableRowGroup();
+            var headerRow = new TableRow();
+            foreach (var h in tableRows[0])
+            {
+                headerRow.Cells.Add(new TableCell(new Paragraph(new Run(h.Trim()))) { Padding = new Thickness(4), FontWeight = FontWeights.Bold });
+            }
+            trg.Rows.Add(headerRow);
+
+            for (int r = 1; r < tableRows.Count; r++)
+            {
+                var row = new TableRow();
+                for (int c = 0; c < cols; c++)
+                {
+                    var txt = c < tableRows[r].Length ? tableRows[r][c].Trim() : "";
+                    row.Cells.Add(new TableCell(new Paragraph(new Run(txt))) { Padding = new Thickness(4) });
+                }
+                trg.Rows.Add(row);
+            }
+
+            table.RowGroups.Add(trg);
+            docTable.Blocks.Add(table);
+            rtb.Document = docTable;
+            return rtb;
+        }
+
+        private Expander CreateCollapsibleTable(List<string[]> tableRows)
+        {
+            var dataRowCount = Math.Max(0, tableRows.Count - 1);
+            var expander = new Expander
+            {
+                Header = $"表を表示（{dataRowCount}行）",
+                IsExpanded = false,
+                Margin = new Thickness(0, 6, 0, 0)
+            };
+
+            expander.Content = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                MaxHeight = 260,
+                Content = CreateTableRichTextBox(tableRows)
+            };
+
+            return expander;
+        }
+
         // Replace @range_ref(#Rn) placeholders with the original @range(sheet,addr) where possible for display/copy.
         private string ReplaceRangeRefsForDisplay(string text)
         {
             if (string.IsNullOrEmpty(text)) return text;
 
-            // pattern: @range_ref(#R1)
+            // pattern: @range_ref\(#(?<id>R\d+)\)
             var m = Regex.Matches(text, @"@range_ref\(#(?<id>R\d+)\)", RegexOptions.IgnoreCase);
             if (m.Count == 0) return text;
 
@@ -286,6 +348,7 @@ namespace ExcelChatAddin
 
             return sb.ToString();
         }
+
         public ChatView()
         {
             InitializeComponent();
@@ -363,7 +426,7 @@ namespace ExcelChatAddin
                 // If user requested table for this send (input-area checkbox), append instruction
                 if (_requestTableForNextSend)
                 {
-                    payload += "\n\n出力形式: 結果をMarkdownの表形式（| 列1 | 列2 | ... |）で返してください。必ずヘッダー行を含め、表以外の余計な説明は最小限にしてください。";
+                    payload += "\n\n出力形式: 結果をMarkdownの表形式（| 列1 |列 2 | ... |）で返してください。必ずヘッダー行を含め、表以外の余計な説明は最小限にしてください。";
                     // reset one-shot flag
                     _requestTableForNextSend = false;
                     chkRequestTable.IsChecked = false;
@@ -513,51 +576,9 @@ namespace ExcelChatAddin
             // If text looks like a Markdown table, render as FlowDocument Table inside a read-only RichTextBox
             if (TryParseMarkdownTable(displayText ?? "", out var tableRows))
             {
-                var rtb = new RichTextBox
-                {
-                    IsReadOnly = true,
-                    BorderThickness = new Thickness(0),
-                    FontSize = 14,
-                    Margin = new Thickness(0, 6, 0, 0),
-                    Background = System.Windows.Media.Brushes.Transparent
-                };
-
-                var docTable = new FlowDocument { PagePadding = new Thickness(0) };
-                var table = new Table();
-
-                int cols = tableRows[0].Length;
-                for (int i = 0; i < cols; i++) table.Columns.Add(new TableColumn());
-
-                var trg = new TableRowGroup();
-
-                // header
-                var headerRow = new TableRow();
-                foreach (var h in tableRows[0])
-                {
-                    var cell = new TableCell(new Paragraph(new Run(h.Trim()))) { Padding = new Thickness(4), FontWeight = FontWeights.Bold };
-                    headerRow.Cells.Add(cell);
-                }
-                trg.Rows.Add(headerRow);
-
-                // body
-                for (int r = 1; r < tableRows.Count; r++)
-                {
-                    var row = new TableRow();
-                    for (int c = 0; c < cols; c++)
-                    {
-                        var txt = c < tableRows[r].Length ? tableRows[r][c].Trim() : "";
-                        var cell = new TableCell(new Paragraph(new Run(txt))) { Padding = new Thickness(4) };
-                        row.Cells.Add(cell);
-                    }
-                    trg.Rows.Add(row);
-                }
-
-                table.RowGroups.Add(trg);
-                docTable.Blocks.Add(table);
-                rtb.Document = docTable;
-
-                grid.Children.Add(rtb);
-                Grid.SetRow(rtb, 1);
+                var expander = CreateCollapsibleTable(tableRows);
+                grid.Children.Add(expander);
+                Grid.SetRow(expander, 1);
             }
             else
             {
@@ -662,41 +683,8 @@ namespace ExcelChatAddin
                                     panel.Children.Add(new TextBlock { Text = before.Trim(), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4) });
                                 }
 
-                                var rtb = new RichTextBox
-                                {
-                                    IsReadOnly = true,
-                                    BorderThickness = new Thickness(0),
-                                    FontSize = 14,
-                                    Margin = new Thickness(0, 6, 0, 0),
-                                    Background = System.Windows.Media.Brushes.Transparent
-                                };
-
-                                var docTable = new FlowDocument { PagePadding = new Thickness(0) };
-                                var table = new Table();
-                                int cols = rows[0].Length;
-                                for (int c = 0; c < cols; c++) table.Columns.Add(new TableColumn());
-                                var trg = new TableRowGroup();
-
-                                var headerRow = new TableRow();
-                                foreach (var h in rows[0]) headerRow.Cells.Add(new TableCell(new Paragraph(new Run(h.Trim()))) { Padding = new Thickness(4), FontWeight = FontWeights.Bold });
-                                trg.Rows.Add(headerRow);
-
-                                for (int r = 1; r < rows.Count; r++)
-                                {
-                                    var row = new TableRow();
-                                    for (int c = 0; c < cols; c++)
-                                    {
-                                        var txt = c < rows[r].Length ? rows[r][c].Trim() : "";
-                                        row.Cells.Add(new TableCell(new Paragraph(new Run(txt))) { Padding = new Thickness(4) });
-                                    }
-                                    trg.Rows.Add(row);
-                                }
-
-                                table.RowGroups.Add(trg);
-                                docTable.Blocks.Add(table);
-                                rtb.Document = docTable;
-
-                                panel.Children.Add(rtb);
+                                var expander = CreateCollapsibleTable(rows);
+                                panel.Children.Add(expander);
 
                                 if (!string.IsNullOrWhiteSpace(after))
                                 {
