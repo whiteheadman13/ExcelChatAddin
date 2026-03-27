@@ -3,6 +3,18 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (チャットプレビュー画面からの用語登録)
+- 事象: チャットのマスキング確認プレビュー画面から、選択語を直接用語登録したい。
+- 参照元:
+  - `C:\Users\Masay\source\repos\powerpoint_masking2\docs\メソッド一覧.md`
+- 修正内容:
+  1. `MaskPreviewWindow` に「選択語を登録」ボタンを追加
+  2. プレビュー内選択テキストで `RegisterDialog` を開いて辞書登録できるようにする
+  3. 登録後、プレビュー中の選択箇所をプレースホルダへ置換する
+- 対象モジュール:
+  - `ExcelChatAddin/MaskPreviewWindow.xaml`
+  - `ExcelChatAddin/MaskPreviewWindow.xaml.cs`
+
 ## Session Update (リボンに辞書表示機能を追加)
 - 事象: 右クリックメニューだけでなく、リボンからも辞書管理画面を開きたい。
 - 修正内容:
