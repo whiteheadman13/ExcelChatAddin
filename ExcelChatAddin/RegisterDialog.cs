@@ -20,6 +20,8 @@ namespace ExcelChatAddin
         private ComboBox _cmbExisting;
         private RadioButton _rbNew;
         private RadioButton _rbExisting;
+        private CheckBox _chkSaveCategory;
+        private Button _btnDeleteCategory;
 
         // カテゴリ履歴ファイルのパス
         //private string _configPath
@@ -43,7 +45,7 @@ namespace ExcelChatAddin
         public RegisterDialog(string targetText)
         {
             this.Text = "マスキング登録";
-            this.Size = new Size(450, 320);
+            this.Size = new Size(450, 340);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.StartPosition = FormStartPosition.CenterParent;
             this.MaximizeBox = false;
@@ -79,20 +81,42 @@ namespace ExcelChatAddin
             // ★履歴の読み込み
             LoadCategories();
 
-            var lblHint = new Label { Text = "※履歴は自動保存されます", Location = new Point(310, 78), AutoSize = true, ForeColor = Color.Gray, Font = new Font(this.Font.FontFamily, 8) };
+            _chkSaveCategory = new CheckBox
+            {
+                Text = "履歴に保存",
+                Location = new Point(310, 78),
+                AutoSize = true,
+                Checked = false,
+                Font = new Font(this.Font.FontFamily, 8)
+            };
+
+            _btnDeleteCategory = new Button
+            {
+                Text = "🗑️",
+                Location = new Point(310, 100),
+                Size = new Size(25, 22),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font(this.Font.FontFamily, 8),
+                ForeColor = Color.Red
+            };
+            _btnDeleteCategory.FlatAppearance.BorderSize = 0;
+            _btnDeleteCategory.Click += BtnDeleteCategory_Click;
+
+            var ttDeleteCat = new ToolTip();
+            ttDeleteCat.SetToolTip(_btnDeleteCategory, "選択中のカテゴリを履歴から削除");
 
             // --- B. 既存タグへの紐付け (表記揺れ対応) ---
             _rbExisting = new RadioButton { 
                 Text = "既存のタグに紐付け (表記揺れ)", 
-                Location = new Point(20, 120), 
+                Location = new Point(20, 130), 
                 Size = new Size(300, 20),
                 AutoSize = true 
             };
             _rbExisting.CheckedChanged += (s, e) => ToggleUI();
 
-            var lblExistName = new Label { Text = "既存タグ:", Location = new Point(40, 148), AutoSize = true };
+            var lblExistName = new Label { Text = "既存タグ:", Location = new Point(40, 158), AutoSize = true };
             _cmbExisting = new ComboBox { 
-                Location = new Point(100, 145), 
+                Location = new Point(100, 155), 
                 Width = 280, 
                 DropDownStyle = ComboBoxStyle.DropDownList 
             };
@@ -120,7 +144,7 @@ namespace ExcelChatAddin
             // --- C. ボタンエリア ---
             var btnOk = new Button { 
                 Text = "登録", 
-                Location = new Point(230, 230), 
+                Location = new Point(230, 240), 
                 DialogResult = DialogResult.OK 
             };
             
@@ -130,9 +154,12 @@ namespace ExcelChatAddin
 
                 if (this.IsNewCategory)
                 {
-                    // 新規の場合：入力されたカテゴリを保存し、履歴ファイルも更新
+                    // 新規の場合：入力されたカテゴリを取得し、チェック時のみ履歴ファイルを更新
                     this.SelectedCategory = _cmbNewCategory.Text;
-                    SaveCategory(this.SelectedCategory);
+                    if (_chkSaveCategory.Checked)
+                    {
+                        SaveCategory(this.SelectedCategory);
+                    }
                 }
                 else
                 {
@@ -146,13 +173,13 @@ namespace ExcelChatAddin
 
             var btnCancel = new Button { 
                 Text = "キャンセル", 
-                Location = new Point(320, 230), 
+                Location = new Point(320, 240), 
                 DialogResult = DialogResult.Cancel 
             };
 
             this.Controls.AddRange(new Control[] { 
                 lblTarget, 
-                _rbNew, lblCatName, _cmbNewCategory, lblHint,
+                _rbNew, lblCatName, _cmbNewCategory, _chkSaveCategory, _btnDeleteCategory,
                 _rbExisting, lblExistName, _cmbExisting, 
                 btnOk, btnCancel 
             });
@@ -167,6 +194,8 @@ namespace ExcelChatAddin
         {
             bool isNew = _rbNew.Checked;
             _cmbNewCategory.Enabled = isNew;
+            _chkSaveCategory.Enabled = isNew;
+            _btnDeleteCategory.Enabled = isNew;
             _cmbExisting.Enabled = !isNew;
             if (isNew) _cmbNewCategory.Focus();
         }
@@ -235,6 +264,43 @@ namespace ExcelChatAddin
 
                 // UIにも反映（保存したら候補に出るように）
                 _cmbNewCategory.Items.Add(upperCat);
+            }
+            catch
+            {
+                // 必要ならログ
+            }
+        }
+
+        private void BtnDeleteCategory_Click(object sender, EventArgs e)
+        {
+            if (_cmbNewCategory.SelectedIndex < 0)
+            {
+                MessageBox.Show("削除するカテゴリを選択してください。", "確認", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            string selected = _cmbNewCategory.SelectedItem.ToString();
+            var result = MessageBox.Show(
+                $"カテゴリ「{selected}」を履歴から削除しますか？",
+                "確認", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+
+            if (result != DialogResult.Yes) return;
+
+            try
+            {
+                _cmbNewCategory.Items.RemoveAt(_cmbNewCategory.SelectedIndex);
+                _cmbNewCategory.Text = "";
+
+                // ファイルを書き直す
+                Paths.EnsureDataDir();
+                var path = Paths.CategoriesPath;
+                var remaining = new List<string>();
+                foreach (var item in _cmbNewCategory.Items)
+                {
+                    if (item != null && !string.IsNullOrWhiteSpace(item.ToString()))
+                        remaining.Add(item.ToString());
+                }
+                File.WriteAllLines(path, remaining);
             }
             catch
             {

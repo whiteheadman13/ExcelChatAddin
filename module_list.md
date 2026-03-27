@@ -3,6 +3,19 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (用語登録画面の分類登録をチェックボックス判断へ変更)
+- 事象: 用語登録画面で、分類履歴への保存有無をチェックボックスで判断したい。
+- 参照元:
+  - `C:\Users\Masay\source\repos\powerpoint_masking2\docs\メソッド一覧.md`
+  - `C:\Users\Masay\source\repos\powerpoint_masking2\powerpoint_masking2\RegisterDialog.cs`
+- 修正内容:
+  1. `RegisterDialog` に「履歴に保存」チェックボックスを追加
+  2. 新規カテゴリ登録時、チェックON時のみ `categories.txt` へ保存する
+  3. カテゴリ履歴削除ボタンを追加し、履歴ファイルへ反映
+  4. 新規/既存切替時の有効状態を更新（チェックボックス/削除ボタン含む）
+- 対象モジュール:
+  - `ExcelChatAddin/RegisterDialog.cs`
+
 ## Session Update (チャットプレビュー画面からの用語登録)
 - 事象: チャットのマスキング確認プレビュー画面から、選択語を直接用語登録したい。
 - 参照元:
