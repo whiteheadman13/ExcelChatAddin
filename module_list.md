@@ -3,6 +3,22 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (辞書管理更新処理の PowerPoint 実装反映)
+- 事象: Excel 側の辞書管理画面は、PowerPoint 側で更新済みの安全な保存ロジックが未反映だった。
+- 参照元:
+  - `C:\Users\Masay\source\repos\powerpoint_masking2\docs\メソッド一覧.md`
+  - `C:\Users\Masay\source\repos\powerpoint_masking2\powerpoint_masking2\DictionaryManager.cs`
+  - `C:\Users\Masay\source\repos\powerpoint_masking2\powerpoint_masking2\DictionaryManagerLogic.cs`
+- 修正内容:
+  1. フィルタ中でも表示中行の編集内容を `_originalData` へマージする
+  2. フィルタ非表示の行は保存時に削除しない
+  3. 非フィルタ時のみ、グリッドから消えた行を削除扱いにする
+  4. 補助ロジックを `DictionaryManagerLogic.cs` として分離する
+- 対象モジュール:
+  - `ExcelChatAddin/DictionaryManager.cs`
+  - `ExcelChatAddin/DictionaryManagerLogic.cs`
+  - `ExcelChatAddin/ExcelChatAddin.csproj`
+
 ## Session Update (rules.json 読込失敗時の保護強化)
 - 事象: `rules.json` 読込失敗時にデータ消失へつながる恐れがある。
 - 修正内容:

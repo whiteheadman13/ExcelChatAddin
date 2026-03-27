@@ -200,6 +200,7 @@
     <Compile Include="DictionaryManager.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="DictionaryManagerLogic.cs" />
     <Compile Include="GeminiClient.cs" />
     <Compile Include="GeminiDtos.cs" />
     <Compile Include="GeminiResponseWindow.xaml.cs">
