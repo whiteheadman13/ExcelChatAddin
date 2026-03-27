@@ -84,7 +84,7 @@ namespace ExcelChatAddin
             {
                 for (int c = 1; c <= colCount; c++)
                 {
-                    if (c > 1) sb.Append(" | ");
+                    if (c > 1) sb.Append('\t');
                     sb.Append(SanitizeCell(arr[r, c]));
                 }
                 if (r < rowCount) sb.AppendLine();

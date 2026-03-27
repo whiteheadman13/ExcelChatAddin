@@ -243,9 +243,4 @@ namespace ExcelChatAddin
         }
 
     }
-    // Paths.cs
-
-    
-
-
 }

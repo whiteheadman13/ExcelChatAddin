@@ -18,7 +18,6 @@ namespace ExcelChatAddin
         private readonly Dictionary<int, TaskPaneHost> _hostsByHwnd
             = new Dictionary<int, TaskPaneHost>();
 
-        // 既存：チャットへ転送
         private Office.CommandBarButton _sendBtn;
         private const string MENU_TAG = "OfficeChat_SendSelectionToChat";
         private bool _maskRegisterDialogOpen = false;
@@ -66,15 +65,49 @@ namespace ExcelChatAddin
 
         private void ThisAddIn_Startup(object sender, EventArgs e)
         {
-            AddCellContextMenu(); // 既存：チャット転送
-
             PurgeMaskMenus();     // 全掃除
 
             AddMaskManageMenu();  // ★通常モード専用
             //AddMaskRegisterMenus(); // ★編集モード専用
             RegisterHotKey_CtrlShiftM();
+
+            if (MaskingEngine.Instance.IsAvailable)
+            {
+                AddCellContextMenu(); // 既存：チャット転送
+            }
+            else
+            {
+                RemoveCellContextMenu();
+                try { UnregisterHotKeys(); } catch { }
+                ShowMaskingUnavailableMessage("Secure Chat");
+            }
+
             this.Application.WorkbookBeforeClose += Application_WorkbookBeforeClose;
         }
+
+        private string BuildMaskingUnavailableMessage()
+        {
+            var details = MaskingEngine.Instance.AvailabilityErrorMessage;
+            if (string.IsNullOrWhiteSpace(details))
+            {
+                details = "マスキング辞書を読み込めないため、マスキング機能を利用できません。";
+            }
+
+            return details + "\n\nこの状態では Secure Chat を使用できません。";
+        }
+
+        private void ShowMaskingUnavailableMessage(string title)
+        {
+            MessageBox.Show(BuildMaskingUnavailableMessage(), title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        private bool EnsureMaskingAvailable(string title)
+        {
+            if (MaskingEngine.Instance.IsAvailable) return true;
+            ShowMaskingUnavailableMessage(title);
+            return false;
+        }
+
         private void AddMaskManageMenu()
         {
             try
@@ -96,6 +129,8 @@ namespace ExcelChatAddin
 
         private void RegisterHotKey_CtrlShiftM()
         {
+            if (!MaskingEngine.Instance.IsAvailable) return;
+
             try { UnregisterHotKeys(); } catch { } // ★先に掃除
 
             try
@@ -134,6 +169,8 @@ namespace ExcelChatAddin
 
         private void RunMaskRegisterFromShortcut()
         {
+            if (!EnsureMaskingAvailable("マスキング登録")) return;
+
             // ★時間ガードはロック前（ここで return してもロック不要）
             long nowTicks = DateTime.UtcNow.Ticks;
             long last = System.Threading.Interlocked.Read(ref _lastHotKeyTicks);
@@ -193,9 +230,12 @@ namespace ExcelChatAddin
         {
             try
             {
-                IntPtr hwnd = new IntPtr(this.Application.Hwnd);
-                bool ok = UnregisterHotKeyNative(hwnd, HOTKEY_ID_REGISTER);
-                System.Diagnostics.Debug.WriteLine($"[HotKey] UnregisterHotKey result: {ok}");
+                IntPtr hwnd = _hotKeyWindow?.WindowHandle ?? IntPtr.Zero;
+                if (hwnd != IntPtr.Zero)
+                {
+                    bool ok = UnregisterHotKeyNative(hwnd, HOTKEY_ID_REGISTER);
+                    System.Diagnostics.Debug.WriteLine($"[HotKey] UnregisterHotKey result: {ok}");
+                }
             }
             catch { }
 
@@ -209,48 +249,6 @@ namespace ExcelChatAddin
             }
             catch { }
         }
-
-        //private void TryAddRegisterToBar(string barName)
-        //{
-        //    try
-        //    {
-        //        var cb = this.Application.CommandBars[barName];
-        //        if (cb == null) return;
-
-        //        RemoveCommandBarControl(cb, MaskMenuTagRegister);
-
-        //        var btnReg = (Office.CommandBarButton)cb.Controls.Add(
-        //            Office.MsoControlType.msoControlButton, Temporary: true);
-        //        btnReg.Caption = "選択文字列をマスキング登録…";
-        //        btnReg.Tag = MaskMenuTagRegister;
-        //        btnReg.Click += BtnReg_Click;
-        //    }
-        //    catch { }
-        //}
-
-        //private void TryAddRegisterToFirstExistingBar(string[] bars)
-        //{
-        //    foreach (var name in bars)
-        //    {
-        //        try
-        //        {
-        //            var cb = this.Application.CommandBars[name];
-        //            if (cb == null) continue;
-
-        //            RemoveCommandBarControl(cb, MaskMenuTagRegister);
-
-        //            var btnReg = (Office.CommandBarButton)cb.Controls.Add(
-        //                Office.MsoControlType.msoControlButton, Temporary: true);
-        //            btnReg.Caption = "選択文字列をマスキング登録…";
-        //            btnReg.Tag = MaskMenuTagRegister;
-        //            btnReg.Click += BtnReg_Click;
-
-        //            break; // 1つだけ
-        //        }
-        //        catch { }
-        //    }
-        //}
-
 
         private void PurgeMaskMenus()
         {
@@ -465,6 +463,8 @@ namespace ExcelChatAddin
 
         private void BtnMng_Click(Office.CommandBarButton Ctrl, ref bool CancelDefault)
         {
+            if (!EnsureMaskingAvailable("辞書管理")) return;
+
             // ★完全排他（同時発火を物理的に止める）
             if (System.Threading.Interlocked.Exchange(ref _inManageClick, 1) == 1)
                 return;
@@ -568,6 +568,8 @@ namespace ExcelChatAddin
         // =========================================================
         private void AddCellContextMenu()
         {
+            if (!MaskingEngine.Instance.IsAvailable) return;
+
             try
             {
                 var cellBar = this.Application.CommandBars["Cell"];
@@ -610,6 +612,8 @@ namespace ExcelChatAddin
         // 既存：@range トークン追加
         private void Btn_Click(Office.CommandBarButton Ctrl, ref bool CancelDefault)
         {
+            if (!EnsureMaskingAvailable("Secure Chat")) return;
+
             try
             {
                 var sel = this.Application.Selection as Excel.Range;
@@ -636,6 +640,8 @@ namespace ExcelChatAddin
 
         public void ShowChat()
         {
+            if (!EnsureMaskingAvailable("Secure Chat")) return;
+
             try
             {
                 var win = this.Application.ActiveWindow;

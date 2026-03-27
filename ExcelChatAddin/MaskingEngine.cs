@@ -1,9 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
-using System.Linq;                // Select, OrderBy等に必要
-using System.Text.RegularExpressions; // Regexに必要
+using System.Linq;
+using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 
 namespace ExcelChatAddin
@@ -11,68 +10,82 @@ namespace ExcelChatAddin
     public class MaskingEngine
     {
         private static MaskingEngine _instance;
-        
-        // 辞書データの実体
         private Dictionary<string, string> _maskDb = new Dictionary<string, string>();
+        private bool _loadFailed;
+        private string _loadFailureMessage;
 
-        // 保存ファイルのパス (DLLと同じフォルダの rules.json)
-        // 新保存先（AppData）
         private string RulesPath
         {
             get { return Paths.RulesPath; }
         }
 
-        // 旧保存先（DLL直下：過去移行用）
         private string LegacyRulesPath
         {
             get { return Paths.LegacyRulesPath; }
         }
 
+        private string RulesBackupPath1
+        {
+            get { return RulesPath + ".bak1"; }
+        }
+
+        private string RulesBackupPath2
+        {
+            get { return RulesPath + ".bak2"; }
+        }
+
         public static MaskingEngine Instance => _instance ?? (_instance = new MaskingEngine());
+
+        public bool IsAvailable
+        {
+            get { return !_loadFailed; }
+        }
+
+        public string AvailabilityErrorMessage
+        {
+            get { return _loadFailureMessage; }
+        }
 
         private MaskingEngine()
         {
-            LoadRules(); // 起動時に自動読み込み
+            LoadRules();
         }
 
-    // --- MaskingEngine.cs 内の AddRule メソッドを修正 ---
-    public void AddRule(string original, string category)
-    {
-        if (string.IsNullOrWhiteSpace(original) || _maskDb.ContainsKey(original)) return;
-
-        string cleanCategory = category.Trim().ToUpper().Replace(" ", "_");
-        if (string.IsNullOrEmpty(cleanCategory)) cleanCategory = "MASK";
-
-        int count = 1;
-        string placeholder;
-        do
+        public void AddRule(string original, string category)
         {
-            // ★ [ ] をやめて __ __ に変更
-            placeholder = $"__{cleanCategory}_{count}__";
-            count++;
-        } while (_maskDb.ContainsValue(placeholder));
-
-        _maskDb.Add(original, placeholder);
-        SaveRules();
-    }
-
-        // --- 2. ルールの登録 (★追加機能: 既存プレースホルダを指定) ---
-        // これが不足していたためエラーになっていました
-        public void AddRuleWithPlaceholder(string original, string placeholder)
-        {
+            EnsureAvailableForWrite();
             if (string.IsNullOrWhiteSpace(original) || _maskDb.ContainsKey(original)) return;
-            
+
+            string cleanCategory = (category ?? string.Empty).Trim().ToUpper().Replace(" ", "_");
+            if (string.IsNullOrEmpty(cleanCategory)) cleanCategory = "MASK";
+
+            int count = 1;
+            string placeholder;
+            do
+            {
+                placeholder = $"__{cleanCategory}_{count}__";
+                count++;
+            } while (_maskDb.ContainsValue(placeholder));
+
             _maskDb.Add(original, placeholder);
             SaveRules();
         }
 
-        // --- 3. 既存のプレースホルダと、その代表例を取得 (★改良版) ---
-        // 戻り値: Dictionary<プレースホルダ, 代表的な元の単語>
+        public void AddRuleWithPlaceholder(string original, string placeholder)
+        {
+            EnsureAvailableForWrite();
+            if (string.IsNullOrWhiteSpace(original) || _maskDb.ContainsKey(original)) return;
+            if (string.IsNullOrWhiteSpace(placeholder)) return;
+
+            _maskDb.Add(original, placeholder);
+            SaveRules();
+        }
+
         public Dictionary<string, string> GetExistingPlaceholdersWithExample()
         {
-            var result = new Dictionary<string, string>();
+            if (!IsAvailable) return new Dictionary<string, string>();
 
-            // 辞書を走査して、各プレースホルダの「最初の1個」を例として拾う
+            var result = new Dictionary<string, string>();
             foreach (var kvp in _maskDb)
             {
                 if (!result.ContainsKey(kvp.Value))
@@ -81,11 +94,9 @@ namespace ExcelChatAddin
                 }
             }
 
-            // プレースホルダ名順にソートして返す
             return result.OrderBy(x => x.Key).ToDictionary(x => x.Key, x => x.Value);
         }
 
-        // --- 4. 管理画面用 ---
         public Dictionary<string, string> GetAllRules()
         {
             return new Dictionary<string, string>(_maskDb);
@@ -93,14 +104,14 @@ namespace ExcelChatAddin
 
         public void OverrideRules(Dictionary<string, string> newRules)
         {
-            _maskDb = new Dictionary<string, string>(newRules);
+            EnsureAvailableForWrite();
+            _maskDb = new Dictionary<string, string>(newRules ?? new Dictionary<string, string>());
             SaveRules();
         }
 
-        // --- 5. マスキング実行 ---
         public string Mask(string input)
         {
-            if (string.IsNullOrEmpty(input) || _maskDb.Count == 0) return input;
+            if (!IsAvailable || string.IsNullOrEmpty(input) || _maskDb.Count == 0) return input;
 
             var sortedKeys = _maskDb.Keys.OrderByDescending(k => k.Length).ToList();
             string pattern = "(" + string.Join("|", sortedKeys.Select(k => Regex.Escape(k))) + ")";
@@ -111,10 +122,9 @@ namespace ExcelChatAddin
             });
         }
 
-        // --- 6. 復元（アンマスク）実行 ---
         public string Unmask(string input)
         {
-            if (string.IsNullOrEmpty(input) || _maskDb.Count == 0) return input;
+            if (!IsAvailable || string.IsNullOrEmpty(input) || _maskDb.Count == 0) return input;
 
             string output = input;
             var pairs = _maskDb.ToList();
@@ -128,64 +138,118 @@ namespace ExcelChatAddin
             return output;
         }
 
-        // --- ファイル入出力 ---
+        private void EnsureAvailableForWrite()
+        {
+            if (IsAvailable) return;
+            throw new InvalidOperationException(_loadFailureMessage ?? "マスキング辞書を読み込めないため保存できません。");
+        }
+
         private void SaveRules()
         {
+            EnsureAvailableForWrite();
+
             try
             {
-                Paths.EnsureDataDir();   // ★追加：AppDataフォルダ確実に作る
+                Paths.EnsureDataDir();
                 string json = JsonConvert.SerializeObject(_maskDb, Formatting.Indented);
                 File.WriteAllText(RulesPath, json);
+                DebugLogger.LogInfo($"Saved masking rules: path='{RulesPath}', count={_maskDb.Count}");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                DebugLogger.LogException(ex, $"Failed to save masking rules: path='{RulesPath}'");
+                throw;
+            }
         }
 
         private void LoadRules()
         {
+            _maskDb = new Dictionary<string, string>();
+            _loadFailed = false;
+            _loadFailureMessage = null;
+
             try
             {
-                // ★ 初回だけ：旧(DLL直下) → 新(AppData)
                 Paths.EnsureDataDir();
                 if (!File.Exists(RulesPath) && File.Exists(LegacyRulesPath))
                 {
                     File.Copy(LegacyRulesPath, RulesPath);
                 }
 
-                if (File.Exists(RulesPath))
+                BackupRulesOnStartup();
+
+                if (!File.Exists(RulesPath))
                 {
-                    string json = File.ReadAllText(RulesPath);
-                    var dict = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
+                    DebugLogger.LogInfo($"Masking rules file not found. path='{RulesPath}'");
+                    return;
+                }
 
-                    if (dict != null)
+                string json = File.ReadAllText(RulesPath);
+                if (string.IsNullOrWhiteSpace(json))
+                {
+                    throw new InvalidDataException("rules.json が空です。");
+                }
+
+                var dict = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
+                if (dict == null)
+                {
+                    throw new InvalidDataException("rules.json を辞書形式として読み込めませんでした。");
+                }
+
+                bool needsMigration = false;
+                var migratedDict = new Dictionary<string, string>();
+
+                foreach (var kvp in dict)
+                {
+                    if (kvp.Value != null && kvp.Value.StartsWith("[") && kvp.Value.EndsWith("]"))
                     {
-                        bool needsMigration = false;
-                        var migratedDict = new Dictionary<string, string>();
-
-                        foreach (var kvp in dict)
-                        {
-                            if (kvp.Value.StartsWith("[") && kvp.Value.EndsWith("]"))
-                            {
-                                string newPlaceholder = "__" + kvp.Value.Trim('[', ']') + "__";
-                                migratedDict.Add(kvp.Key, newPlaceholder);
-                                needsMigration = true;
-                            }
-                            else
-                            {
-                                migratedDict.Add(kvp.Key, kvp.Value);
-                            }
-                        }
-
-                        _maskDb = migratedDict;
-
-                        if (needsMigration)
-                        {
-                            SaveRules();
-                        }
+                        string newPlaceholder = "__" + kvp.Value.Trim('[', ']') + "__";
+                        migratedDict.Add(kvp.Key, newPlaceholder);
+                        needsMigration = true;
+                    }
+                    else
+                    {
+                        migratedDict.Add(kvp.Key, kvp.Value);
                     }
                 }
+
+                _maskDb = migratedDict;
+                DebugLogger.LogInfo($"Loaded masking rules: path='{RulesPath}', count={_maskDb.Count}");
+
+                if (needsMigration)
+                {
+                    SaveRules();
+                }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _maskDb = new Dictionary<string, string>();
+                _loadFailed = true;
+                _loadFailureMessage =
+                    "マスキング辞書の読み込みに失敗しました。\n"
+                    + $"ファイル: {RulesPath}\n"
+                    + $"詳細: {ex.Message}\n"
+                    + $"起動時バックアップ: {RulesBackupPath1}, {RulesBackupPath2}";
+                DebugLogger.LogException(ex, $"Failed to load masking rules: path='{RulesPath}'");
+            }
         }
 
+        private void BackupRulesOnStartup()
+        {
+            try
+            {
+                if (!File.Exists(RulesPath)) return;
+
+                if (File.Exists(RulesBackupPath2)) File.Delete(RulesBackupPath2);
+                if (File.Exists(RulesBackupPath1)) File.Move(RulesBackupPath1, RulesBackupPath2);
+                File.Copy(RulesPath, RulesBackupPath1, true);
+
+                DebugLogger.LogInfo($"Backed up masking rules on startup: src='{RulesPath}', bak1='{RulesBackupPath1}', bak2='{RulesBackupPath2}'");
+            }
+            catch (Exception ex)
+            {
+                DebugLogger.LogException(ex, $"Failed to back up masking rules on startup: path='{RulesPath}'");
+            }
+        }
     }
 }

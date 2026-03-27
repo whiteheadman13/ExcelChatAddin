@@ -3,6 +3,31 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (rules.json 読込失敗時の保護強化)
+- 事象: `rules.json` 読込失敗時にデータ消失へつながる恐れがある。
+- 修正内容:
+  1. 起動時に `rules.json` を毎回バックアップし、2世代保持する
+  2. `rules.json` を読めない場合は理由を保持し、利用時に明示する
+  3. 読込失敗時は Secure Chat を開けないようにする
+  4. 読込失敗時は辞書管理/マスキング登録の書き込みも止める
+- 対象モジュール:
+  - `ExcelChatAddin/MaskingEngine.cs`
+  - `ExcelChatAddin/ThisAddIn.cs`
+  - `ExcelChatAddin/ChatRibbon.cs`
+
+## Session Update (マスキング・辞書管理の修正)
+- 事象: マスキング機能と辞書管理機能が正常に機能しない。ソースファイルのフォーマット崩れあり。
+- 修正内容:
+  1. `MaskingEngine.cs` — `AddRule` メソッドのインデント不整合を修正（4sp→8sp）、不適切なコメント削除
+  2. `RegisterDialog.cs` — クラス外の孤立コメント `// Paths.cs` と余分な空行を削除
+  3. `TaskPaneHost.cs` — `RangeToPlainText` のセル区切りを `" | "` → `\t` に修正。`TsvToMarkdownTable` がTSVを前提としておりセル単位マスキングが破壊されていた
+  4. `ThisAddIn.cs` — `UnregisterHotKeys` のHWNDを `this.Application.Hwnd` → `_hotKeyWindow.WindowHandle` に修正（登録先と解除先の不一致）
+- 対象モジュール:
+  - `ExcelChatAddin/MaskingEngine.cs`
+  - `ExcelChatAddin/RegisterDialog.cs`
+  - `ExcelChatAddin/TaskPaneHost.cs`
+  - `ExcelChatAddin/ThisAddIn.cs`
+
 ## Session Update (チャット履歴の表の折りたたみ対応)
 - 事象: チャット履歴に大きい表が表示されると、履歴欄を圧迫して可読性が下がる。
 - 要望: 表部分だけを折りたたみ可能にする。
