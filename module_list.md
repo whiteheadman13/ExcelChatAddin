@@ -3,6 +3,22 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (リボンに辞書表示機能を追加)
+- 事象: 右クリックメニューだけでなく、リボンからも辞書管理画面を開きたい。
+- 修正内容:
+  1. `ChatRibbon` に「辞書表示」ボタンを追加
+  2. `ThisAddIn` に `ShowDictionaryManager()` を追加して右クリックとリボンで共通利用
+- 対象モジュール:
+  - `ExcelChatAddin/ChatRibbon.cs`
+  - `ExcelChatAddin/ThisAddIn.cs`
+
+## Session Update (コミット運用ルール追記)
+- 事象: コミット運用ルールを指示ファイルへ明示したい。
+- 修正内容:
+  1. `.github/copilot-instructions.md` に「コミットは常にタスク終了後に実施する」を追記する
+- 対象モジュール:
+  - `.github/copilot-instructions.md`
+
 ## Session Update (辞書管理更新処理の PowerPoint 実装反映)
 - 事象: Excel 側の辞書管理画面は、PowerPoint 側で更新済みの安全な保存ロジックが未反映だった。
 - 参照元:

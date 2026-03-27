@@ -463,6 +463,11 @@ namespace ExcelChatAddin
 
         private void BtnMng_Click(Office.CommandBarButton Ctrl, ref bool CancelDefault)
         {
+            ShowDictionaryManager();
+        }
+
+        public void ShowDictionaryManager()
+        {
             if (!EnsureMaskingAvailable("辞書管理")) return;
 
             // ★完全排他（同時発火を物理的に止める）
@@ -479,7 +484,7 @@ namespace ExcelChatAddin
             }
             finally
             {
-                _inManageClick = 0;
+                System.Threading.Interlocked.Exchange(ref _inManageClick, 0);
             }
         }
 
