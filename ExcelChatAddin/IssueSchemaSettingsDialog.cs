@@ -10,6 +10,8 @@ namespace ExcelChatAddin
     public class IssueSchemaSettingsDialog : Form
     {
         private readonly Excel.Application _excelApp;
+        private TableSchemaStore _store;
+        private bool _suppressTableSwitch = false;
 
         private ComboBox _cmbTableName;
         private NumericUpDown _numHeaderRow;
@@ -19,8 +21,9 @@ namespace ExcelChatAddin
         public IssueSchemaSettingsDialog(Excel.Application app)
         {
             _excelApp = app;
+            _store = IssueSchemaManager.LoadStore();
             InitializeLayout();
-            LoadSchema();
+            LoadSchemaForTable(null);
         }
 
         private void InitializeLayout()
@@ -40,6 +43,7 @@ namespace ExcelChatAddin
             };
             top.Controls.Add(_cmbTableName);
             PopulateTableNames();
+            _cmbTableName.SelectedIndexChanged += CmbTableName_SelectedIndexChanged;
 
             top.Controls.Add(new Label { Text = "ヘッダー行:", AutoSize = true, Location = new Point(330, 14) });
             _numHeaderRow = new NumericUpDown { Location = new Point(400, 10), Width = 80, Minimum = 1, Maximum = 100000, Value = 1 };
@@ -102,8 +106,16 @@ namespace ExcelChatAddin
                 Text = "保存",
                 Width = 100,
                 Height = 30,
-                Location = new Point(870, 10),
+                Location = new Point(760, 10),
                 Font = new Font(DefaultFont, FontStyle.Bold)
+            };
+            var btnDelete = new Button
+            {
+                Text = "定義削除",
+                Width = 100,
+                Height = 30,
+                Location = new Point(870, 10),
+                ForeColor = Color.Red
             };
             var btnClose = new Button
             {
@@ -114,9 +126,11 @@ namespace ExcelChatAddin
             };
 
             btnSave.Click += BtnSave_Click;
+            btnDelete.Click += BtnDelete_Click;
             btnClose.Click += (s, e) => Close();
 
             bottom.Controls.Add(btnSave);
+            bottom.Controls.Add(btnDelete);
             bottom.Controls.Add(btnClose);
 
             Controls.Add(_grid);
@@ -124,39 +138,77 @@ namespace ExcelChatAddin
             Controls.Add(bottom);
         }
 
-        private void LoadSchema()
+        private void CmbTableName_SelectedIndexChanged(object sender, EventArgs e)
         {
-            var cfg = IssueSchemaManager.LoadOrCreate(_excelApp);
-
-            var tableName = !string.IsNullOrWhiteSpace(cfg.TableName) ? cfg.TableName : (cfg.SheetName ?? "");
-            // ComboBoxの候補に一致する項目があれば選択、なければテキスト直接設定
-            bool found = false;
-            for (int i = 0; i < _cmbTableName.Items.Count; i++)
+            if (_suppressTableSwitch) return;
+            var tableName = ExtractTableName(_cmbTableName.Text);
+            if (!string.IsNullOrWhiteSpace(tableName))
             {
-                var itemText = _cmbTableName.Items[i].ToString();
-                if (itemText.StartsWith(tableName + "  (", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(itemText, tableName, StringComparison.OrdinalIgnoreCase))
+                LoadSchemaForTable(tableName);
+            }
+        }
+
+        private void LoadSchemaForTable(string tableName)
+        {
+            _suppressTableSwitch = true;
+            try
+            {
+                IssueSchemaConfig cfg = null;
+
+                if (!string.IsNullOrWhiteSpace(tableName))
                 {
-                    _cmbTableName.SelectedIndex = i;
-                    found = true;
-                    break;
+                    cfg = IssueSchemaManager.FindByTableName(_store, tableName);
+                }
+
+                if (cfg == null && _store.Tables.Count > 0)
+                {
+                    cfg = _store.Tables[0];
+                }
+
+                if (cfg == null)
+                {
+                    // 新規：空のフォーム
+                    _numHeaderRow.Value = 1;
+                    _numDataStartRow.Value = 2;
+                    _grid.Rows.Clear();
+                    return;
+                }
+
+                // ComboBoxの候補に一致する項目があれば選択
+                var name = cfg.TableName ?? "";
+                bool found = false;
+                for (int i = 0; i < _cmbTableName.Items.Count; i++)
+                {
+                    var itemText = _cmbTableName.Items[i].ToString();
+                    if (itemText.StartsWith(name + "  (", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(itemText, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _cmbTableName.SelectedIndex = i;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) _cmbTableName.Text = name;
+
+                _numHeaderRow.Value = Math.Max(1, cfg.HeaderRow);
+                _numDataStartRow.Value = Math.Max(1, cfg.DataStartRow);
+
+                _grid.Rows.Clear();
+                foreach (var c in cfg.Columns)
+                {
+                    _grid.Rows.Add(
+                        c.ColumnLetter,
+                        c.ColumnName,
+                        c.IsKey,
+                        c.IsRequired,
+                        string.IsNullOrWhiteSpace(c.ValueType) ? "text" : c.ValueType,
+                        string.Join(",", c.AllowedValues ?? new List<string>()),
+                        c.ExampleValue ?? "");
                 }
             }
-            if (!found) _cmbTableName.Text = tableName;
-            _numHeaderRow.Value = Math.Max(1, cfg.HeaderRow);
-            _numDataStartRow.Value = Math.Max(1, cfg.DataStartRow);
-
-            _grid.Rows.Clear();
-            foreach (var c in cfg.Columns)
+            finally
             {
-                _grid.Rows.Add(
-                    c.ColumnLetter,
-                    c.ColumnName,
-                    c.IsKey,
-                    c.IsRequired,
-                    string.IsNullOrWhiteSpace(c.ValueType) ? "text" : c.ValueType,
-                    string.Join(",", c.AllowedValues ?? new List<string>()),
-                    c.ExampleValue ?? "");
+                _suppressTableSwitch = false;
             }
         }
 
@@ -186,11 +238,7 @@ namespace ExcelChatAddin
             {
                 _grid.EndEdit();
 
-                var rawTableName = (_cmbTableName.Text ?? "").Trim();
-                // ComboBox表示は "テーブル名  (シート名)" 形式の場合がある
-                var tableName = rawTableName;
-                var parenIdx = rawTableName.IndexOf("  (", StringComparison.Ordinal);
-                if (parenIdx > 0) tableName = rawTableName.Substring(0, parenIdx).Trim();
+                var tableName = ExtractTableName(_cmbTableName.Text);
                 if (string.IsNullOrWhiteSpace(tableName))
                 {
                     MessageBox.Show("対象テーブル名を入力または選択してください。");
@@ -284,17 +332,61 @@ namespace ExcelChatAddin
                     Columns = cols
                 };
 
-                IssueSchemaManager.Save(cfg);
+                IssueSchemaManager.Upsert(_store, cfg);
+                IssueSchemaManager.SaveStore(_store);
                 EnsureTableIfMissing(cfg);
 
-                MessageBox.Show("保存しました。");
-                DialogResult = DialogResult.OK;
-                Close();
+                MessageBox.Show($"「{tableName}」の定義を保存しました。");
             }
             catch (Exception ex)
             {
                 MessageBox.Show("保存に失敗しました: " + ex.Message);
             }
+        }
+
+        private void BtnDelete_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var tableName = ExtractTableName(_cmbTableName.Text);
+                if (string.IsNullOrWhiteSpace(tableName))
+                {
+                    MessageBox.Show("削除するテーブル名を選択してください。");
+                    return;
+                }
+
+                var existing = IssueSchemaManager.FindByTableName(_store, tableName);
+                if (existing == null)
+                {
+                    MessageBox.Show($"「{tableName}」の定義はありません。");
+                    return;
+                }
+
+                var result = MessageBox.Show($"「{tableName}」の定義を削除しますか？", "定義削除", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                if (result != DialogResult.Yes) return;
+
+                _store.Tables.Remove(existing);
+                IssueSchemaManager.SaveStore(_store);
+
+                // フォームをクリア
+                _grid.Rows.Clear();
+                _numHeaderRow.Value = 1;
+                _numDataStartRow.Value = 2;
+                _cmbTableName.Text = "";
+                MessageBox.Show($"「{tableName}」の定義を削除しました。");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("削除に失敗しました: " + ex.Message);
+            }
+        }
+
+        private string ExtractTableName(string rawText)
+        {
+            var text = (rawText ?? "").Trim();
+            var parenIdx = text.IndexOf("  (", StringComparison.Ordinal);
+            if (parenIdx > 0) text = text.Substring(0, parenIdx).Trim();
+            return text;
         }
 
         private void EnsureTableIfMissing(IssueSchemaConfig cfg)
@@ -304,7 +396,6 @@ namespace ExcelChatAddin
             var wb = _excelApp.ActiveWorkbook;
             if (wb == null) return;
 
-            // テーブル名で既存テーブルを検索
             Excel.ListObject existingTable = null;
             Excel.Worksheet ws = null;
             try
@@ -326,10 +417,8 @@ namespace ExcelChatAddin
             }
             catch { }
 
-            // 既にテーブルがあれば何もしない
             if (existingTable != null) return;
 
-            // シート名が SheetName に指定されていればそこに作る（旧互換）
             if (ws == null && !string.IsNullOrWhiteSpace(cfg.SheetName))
             {
                 try { ws = wb.Worksheets[cfg.SheetName] as Excel.Worksheet; } catch { ws = null; }
@@ -377,16 +466,16 @@ namespace ExcelChatAddin
 
             try
             {
-                var lo = ws.ListObjects.Add(
+                var lo2 = ws.ListObjects.Add(
                     Excel.XlListObjectSourceType.xlSrcRange,
                     tableRange,
                     Type.Missing,
                     Excel.XlYesNoGuess.xlYes,
                     Type.Missing);
 
-                if (lo != null)
+                if (lo2 != null)
                 {
-                    try { lo.Name = cfg.TableName ?? "Table1"; } catch { }
+                    try { lo2.Name = cfg.TableName ?? "Table1"; } catch { }
                 }
             }
             catch
