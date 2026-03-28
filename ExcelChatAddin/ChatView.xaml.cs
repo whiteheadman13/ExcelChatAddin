@@ -453,13 +453,9 @@ namespace ExcelChatAddin
 
                 Dispatcher.Invoke(() =>
                 {
-                    AppendChat("Gemini", unmaskedResponse);
+                    AppendChat("Gemini", unmaskedResponse, raw);
                     btnSendGemini.IsEnabled = true;
                 });
-
-                // 最後の送信内容と応答を保持
-                _lastSentRawInput = raw;
-                _lastGeminiResponse = unmaskedResponse;
             }
             catch (Exception ex)
             {
@@ -518,15 +514,15 @@ namespace ExcelChatAddin
             return sb.ToString();
         }
 
-        private void AppendChat(string role, string text)
+        private void AppendChat(string role, string text, string relatedInputForApply = null)
         {
             if (!Dispatcher.CheckAccess())
             {
-                Dispatcher.Invoke(() => AppendChat(role, text));
+                Dispatcher.Invoke(() => AppendChat(role, text, relatedInputForApply));
                 return;
             }
 
-            // Create a message container with a small copy button at the top-right
+            // Create a message container with action buttons at the top-right
             var container = new Border
             {
                 Background = System.Windows.Media.Brushes.White,
@@ -541,7 +537,7 @@ namespace ExcelChatAddin
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            // Header: role + copy button
+            // Header: role + action buttons
             var headerPanel = new DockPanel();
 
             var roleText = new TextBlock
@@ -563,7 +559,6 @@ namespace ExcelChatAddin
                 VerticalAlignment = VerticalAlignment.Top,
                 Margin = new Thickness(6, 0, 0, 0)
             };
-            // click handler will copy either raw text or converted TSV if the content includes tables
             copyBtn.Click += (_, __) =>
             {
                 try
@@ -577,13 +572,31 @@ namespace ExcelChatAddin
             DockPanel.SetDock(copyBtn, Dock.Right);
             headerPanel.Children.Add(copyBtn);
 
+            if (string.Equals(role, "Gemini", StringComparison.OrdinalIgnoreCase))
+            {
+                var applyBtn = new Button
+                {
+                    Content = "反映",
+                    Width = 56,
+                    Height = 22,
+                    FontSize = 12,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(6, 0, 0, 0)
+                };
+                applyBtn.Click += (_, __) =>
+                {
+                    ApplyResponseToSheet(text ?? "", relatedInputForApply ?? "");
+                };
+                DockPanel.SetDock(applyBtn, Dock.Right);
+                headerPanel.Children.Add(applyBtn);
+            }
+
             grid.Children.Add(headerPanel);
             Grid.SetRow(headerPanel, 0);
 
-            // Replace range refs for display in chat (show original @range(...) where possible)
             var displayText = ReplaceRangeRefsForDisplay(text ?? "");
 
-            // If text looks like a Markdown table, render as FlowDocument Table inside a read-only RichTextBox
             if (TryParseMarkdownTable(displayText ?? "", out var tableRows))
             {
                 var expander = CreateCollapsibleTable(tableRows);
@@ -603,10 +616,8 @@ namespace ExcelChatAddin
             }
 
             container.Child = grid;
-
             ChatHistoryPanel.Children.Add(container);
 
-            // Scroll to bottom
             try
             {
                 ChatHistoryScroll?.ScrollToVerticalOffset(ChatHistoryScroll.ExtentHeight);
@@ -1331,11 +1342,54 @@ namespace ExcelChatAddin
                 if (string.IsNullOrWhiteSpace(sheetName)) return;
                 if (sheetName.StartsWith("(", StringComparison.Ordinal)) return;
 
-                AppendText($"@range({sheetName},A1)");
+                var token = BuildRangeTokenForSheet(sheetName);
+                AppendText(token);
                 FocusInput();
             }
             catch
             {
+            }
+        }
+
+        private string BuildRangeTokenForSheet(string sheetName)
+        {
+            try
+            {
+                var app = Globals.ThisAddIn?.Application;
+                var wb = app?.ActiveWorkbook;
+                if (wb == null) return $"@range({sheetName},A1)";
+
+                var ws = wb.Worksheets[sheetName] as Excel.Worksheet;
+                if (ws == null) return $"@range({sheetName},A1)";
+
+                string addr = null;
+
+                try
+                {
+                    if (ws.ListObjects != null && ws.ListObjects.Count > 0)
+                    {
+                        var lo = ws.ListObjects.Item[1] as Excel.ListObject;
+                        addr = lo?.Range?.Address[false, false, Excel.XlReferenceStyle.xlA1];
+                    }
+                }
+                catch { }
+
+                if (string.IsNullOrWhiteSpace(addr))
+                {
+                    try
+                    {
+                        var used = ws.UsedRange;
+                        addr = used?.Address[false, false, Excel.XlReferenceStyle.xlA1];
+                    }
+                    catch { }
+                }
+
+                if (string.IsNullOrWhiteSpace(addr)) addr = "A1";
+                return $"@range({sheetName},{addr})";
+            }
+            catch
+            {
+                return $"@range({sheetName},A1)";
             }
         }
 
@@ -1398,15 +1452,21 @@ namespace ExcelChatAddin
 
         private void BtnApplyToSheet_Click(object sender, RoutedEventArgs e)
         {
+            // 互換用（現在は各Gemini回答の『反映』ボタンを推奨）
+            ApplyResponseToSheet(_lastGeminiResponse, _lastSentRawInput);
+        }
+
+        private void ApplyResponseToSheet(string responseText, string relatedInputForApply)
+        {
             try
             {
-                if (string.IsNullOrWhiteSpace(_lastGeminiResponse))
+                if (string.IsNullOrWhiteSpace(responseText))
                 {
-                    MessageBox.Show("反映対象の回答がありません。先に送信してください。", "反映");
+                    MessageBox.Show("反映対象の回答がありません。", "反映");
                     return;
                 }
 
-                if (!TryExtractRowsForApply(_lastGeminiResponse, out var rows) || rows == null || rows.Count == 0)
+                if (!TryExtractRowsForApply(responseText, relatedInputForApply, out var rows) || rows == null || rows.Count == 0)
                 {
                     MessageBox.Show("回答または入力内容から反映データを抽出できませんでした。Markdown表/TSV、または A-001: ... 形式で指定してください。", "反映");
                     return;
@@ -1419,7 +1479,7 @@ namespace ExcelChatAddin
                     return;
                 }
 
-                Excel.Range startCell = TryResolveApplyStartCell(app);
+                Excel.Range startCell = TryResolveApplyStartCell(app, relatedInputForApply);
                 if (startCell == null)
                 {
                     MessageBox.Show("反映先セルを特定できません。", "反映");
@@ -1435,11 +1495,11 @@ namespace ExcelChatAddin
             }
         }
 
-        private Excel.Range TryResolveApplyStartCell(Excel.Application app)
+        private Excel.Range TryResolveApplyStartCell(Excel.Application app, string relatedInputForApply)
         {
             try
             {
-                var fromInput = TryResolveRangeFromText(app, _lastSentRawInput ?? "");
+                var fromInput = TryResolveRangeFromText(app, relatedInputForApply ?? "");
                 if (fromInput != null) return fromInput.Cells[1, 1] as Excel.Range;
             }
             catch { }
@@ -1461,33 +1521,29 @@ namespace ExcelChatAddin
             }
         }
 
-        private bool TryExtractRowsForApply(string text, out List<string[]> rows)
+        private bool TryExtractRowsForApply(string text, string relatedInputForApply, out List<string[]> rows)
         {
             rows = null;
             if (string.IsNullOrWhiteSpace(text)) return false;
 
-            // 1) Markdown / TSV
             if (TryParseMarkdownTable(text, out var parsed) && parsed != null && parsed.Count > 0)
             {
                 rows = parsed;
                 return true;
             }
 
-            // 2) 箇条書きアクション行（A-001: 田中 / 作業 / 期限 2026-04-05）
             if (TryParseActionLines(text, out var actionRows) && actionRows.Count > 0)
             {
                 rows = actionRows;
                 return true;
             }
 
-            // 3) Gemini回答が曖昧な場合は、直近入力本文からも救済抽出
-            if (TryParseActionLines(_lastSentRawInput ?? "", out actionRows) && actionRows.Count > 0)
+            if (TryParseActionLines(relatedInputForApply ?? "", out actionRows) && actionRows.Count > 0)
             {
                 rows = actionRows;
                 return true;
             }
 
-            // 4) 単一列 fallback
             var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(x => (x ?? "").Trim())
                 .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -1551,7 +1607,6 @@ namespace ExcelChatAddin
             int startRow = startCell.Row;
             int startCol = startCell.Column;
 
-            // 開始セルに既存ヘッダーがあり、書き込み先データ先頭がID行らしければ1行下に書く
             try
             {
                 var current = Convert.ToString(startCell.Value2) ?? "";

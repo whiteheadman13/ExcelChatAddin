@@ -37,12 +37,6 @@
                 <!-- removed: 表形式で表示 (use input-area checkbox instead) -->
                 <Button Content="クリア履歴" Width="80" Height="24" Click="ClearHistory_Click" ToolTip="チャット履歴をクリア" Margin="0,0,6,0"/>
                 <Button Content="再解析" Width="80" Height="24" Click="ReparseHistory_Click" ToolTip="履歴を再解析して表を検出表示" Margin="0,0,6,0"/>
-                <Button x:Name="btnApplyToSheet"
-                        Content="反映"
-                        Width="80"
-                        Height="24"
-                        Click="BtnApplyToSheet_Click"
-                        ToolTip="直近のGemini回答をシートへ反映"/>
             </StackPanel>
         </Grid>
 
