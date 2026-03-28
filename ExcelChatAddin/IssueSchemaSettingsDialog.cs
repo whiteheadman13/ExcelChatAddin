@@ -23,7 +23,11 @@ namespace ExcelChatAddin
             _excelApp = app;
             _store = IssueSchemaManager.LoadStore();
             InitializeLayout();
-            LoadSchemaForTable(null);
+            // 初回: 最初の定義があればそれを表示
+            if (_store.Tables.Count > 0)
+                LoadSchemaForTable(_store.Tables[0].TableName);
+            else
+                LoadSchemaForTable(null);
         }
 
         private void InitializeLayout()
@@ -160,17 +164,13 @@ namespace ExcelChatAddin
                     cfg = IssueSchemaManager.FindByTableName(_store, tableName);
                 }
 
-                if (cfg == null && _store.Tables.Count > 0)
-                {
-                    cfg = _store.Tables[0];
-                }
-
                 if (cfg == null)
                 {
-                    // 新規：空のフォーム
+                    // 定義なし → 空のフォーム（新規定義用）
                     _numHeaderRow.Value = 1;
                     _numDataStartRow.Value = 2;
                     _grid.Rows.Clear();
+                    // ComboBoxのテキストはそのまま（ユーザーが選択したテーブル名を維持）
                     return;
                 }
 

@@ -934,7 +934,7 @@ namespace ExcelChatAddin
             // ★ テーブル項目定義の同梱: 参照範囲に含まれるテーブル名に一致する定義があれば付加
             try
             {
-                var schemaSection = BuildSchemaSection(referencedKeys);
+                var schemaSection = BuildSchemaSection(referencedKeys, referencedTableNames);
                 if (!string.IsNullOrWhiteSpace(schemaSection))
                 {
                     sb.AppendLine(schemaSection);
@@ -1032,36 +1032,52 @@ namespace ExcelChatAddin
         /// - 全参照テーブルの定義を同梱（参考情報として）
         /// - _selectedUpdateTable が設定されている場合のみ JSON強制指示を付加
         /// </summary>
-        private string BuildSchemaSection(List<string> referencedKeys)
+        private string BuildSchemaSection(List<string> referencedKeys, List<string> explicitTableNames)
         {
-            if (referencedKeys == null || referencedKeys.Count == 0) return "";
-
             var app = Globals.ThisAddIn?.Application;
             if (app?.ActiveWorkbook == null) return "";
 
             // 参照範囲内に含まれるテーブル名を収集
             var referencedTableNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            try
+
+            // @table() で明示的に参照されたテーブル名を追加
+            if (explicitTableNames != null)
             {
-                var wb = app.ActiveWorkbook;
-                foreach (var key in referencedKeys)
+                foreach (var n in explicitTableNames)
                 {
-                    var parts = key.Split('!');
-                    if (parts.Length < 1) continue;
-                    var sheetName = parts[0];
-
-                    Excel.Worksheet ws = null;
-                    try { ws = wb.Worksheets[sheetName] as Excel.Worksheet; } catch { continue; }
-                    if (ws?.ListObjects == null) continue;
-
-                    foreach (Excel.ListObject lo in ws.ListObjects)
-                    {
-                        if (!string.IsNullOrWhiteSpace(lo.Name))
-                            referencedTableNames.Add(lo.Name);
-                    }
+                    if (!string.IsNullOrWhiteSpace(n)) referencedTableNames.Add(n);
                 }
             }
-            catch { }
+
+            // @range() で参照されたシート内のテーブル名も追加
+            if (referencedKeys != null && referencedKeys.Count > 0)
+            {
+                try
+                {
+                    var wb = app.ActiveWorkbook;
+                    foreach (var key in referencedKeys)
+                    {
+                        var parts = key.Split('!');
+                        if (parts.Length < 1) continue;
+                        var sheetName = parts[0];
+
+                        Excel.Worksheet ws = null;
+                        try { ws = wb.Worksheets[sheetName] as Excel.Worksheet; } catch { continue; }
+                        if (ws?.ListObjects == null) continue;
+
+                        foreach (Excel.ListObject lo in ws.ListObjects)
+                        {
+                            if (!string.IsNullOrWhiteSpace(lo.Name))
+                                referencedTableNames.Add(lo.Name);
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // 更新対象テーブルも参照テーブルに含める（明示選択されている場合）
+            if (!string.IsNullOrWhiteSpace(_selectedUpdateTable))
+                referencedTableNames.Add(_selectedUpdateTable);
 
             if (referencedTableNames.Count == 0) return "";
 
