@@ -20,14 +20,10 @@ namespace ExcelChatAddin
 
     public class IssueSchemaConfig
     {
-        /// <summary>
-        /// テーブル名（Excel ListObject.Name）。旧 SheetName との互換を維持。
-        /// </summary>
-        [Newtonsoft.Json.JsonProperty("TableName")]
+        [JsonProperty("TableName")]
         public string TableName { get; set; } = "";
 
-        /// <summary>旧JSONとの後方互換用。読込時に TableName が空なら SheetName を採用する。</summary>
-        [Newtonsoft.Json.JsonProperty("SheetName")]
+        [JsonProperty("SheetName")]
         public string SheetName { get; set; } = "";
         public int HeaderRow { get; set; } = 1;
         public int DataStartRow { get; set; } = 2;
@@ -37,65 +33,125 @@ namespace ExcelChatAddin
         public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     }
 
+    /// <summary>
+    /// 複数テーブル定義を保持するルートオブジェクト。
+    /// table_schema.json の最上位が { "Tables": [...] } 形式になる。
+    /// </summary>
+    public class TableSchemaStore
+    {
+        public List<IssueSchemaConfig> Tables { get; set; } = new List<IssueSchemaConfig>();
+    }
+
     public static class IssueSchemaManager
     {
-        public static IssueSchemaConfig LoadOrCreate(Excel.Application app)
+        /// <summary>全テーブル定義を読み込む。</summary>
+        public static TableSchemaStore LoadStore()
         {
             Paths.EnsureDataDir();
 
-            // 新形式（汎用）優先
             if (File.Exists(Paths.TableSchemaPath))
             {
                 try
                 {
                     var json = File.ReadAllText(Paths.TableSchemaPath);
-                    var cfg = JsonConvert.DeserializeObject<IssueSchemaConfig>(json) ?? CreateDefault(app);
-                    return Normalize(cfg);
+
+                    // 新形式（配列）を試行
+                    var store = JsonConvert.DeserializeObject<TableSchemaStore>(json);
+                    if (store?.Tables != null && store.Tables.Count > 0)
+                    {
+                        foreach (var t in store.Tables) Normalize(t);
+                        return store;
+                    }
+
+                    // 旧形式（単体オブジェクト）からの移行
+                    var single = JsonConvert.DeserializeObject<IssueSchemaConfig>(json);
+                    if (single != null && !string.IsNullOrWhiteSpace(single.TableName ?? single.SheetName))
+                    {
+                        Normalize(single);
+                        var migrated = new TableSchemaStore { Tables = new List<IssueSchemaConfig> { single } };
+                        SaveStore(migrated);
+                        return migrated;
+                    }
                 }
-                catch
-                {
-                    var fallback = CreateDefault(app);
-                    Save(fallback);
-                    return fallback;
-                }
+                catch { }
             }
 
-            // 旧形式（課題名）との互換読み込み
+            // 旧ファイル（issue_schema.json）からの移行
             if (File.Exists(Paths.IssueSchemaPath))
             {
                 try
                 {
                     var json = File.ReadAllText(Paths.IssueSchemaPath);
-                    var cfg = JsonConvert.DeserializeObject<IssueSchemaConfig>(json) ?? CreateDefault(app);
-                    var normalized = Normalize(cfg);
-                    Save(normalized); // table_schema.json へ移行保存
-                    return normalized;
+                    var single = JsonConvert.DeserializeObject<IssueSchemaConfig>(json);
+                    if (single != null)
+                    {
+                        Normalize(single);
+                        var migrated = new TableSchemaStore { Tables = new List<IssueSchemaConfig> { single } };
+                        SaveStore(migrated);
+                        return migrated;
+                    }
                 }
-                catch
-                {
-                    var fallback = CreateDefault(app);
-                    Save(fallback);
-                    return fallback;
-                }
+                catch { }
             }
 
-            var created = CreateDefault(app);
-            Save(created);
-            return created;
+            return new TableSchemaStore();
         }
 
-        public static void Save(IssueSchemaConfig config)
+        /// <summary>全テーブル定義を保存する。</summary>
+        public static void SaveStore(TableSchemaStore store)
         {
             Paths.EnsureDataDir();
-
-            var normalized = Normalize(config);
-            normalized.UpdatedAtUtc = DateTime.UtcNow;
-
-            var json = JsonConvert.SerializeObject(normalized, Formatting.Indented);
+            if (store == null) store = new TableSchemaStore();
+            foreach (var t in store.Tables)
+            {
+                Normalize(t);
+                t.UpdatedAtUtc = DateTime.UtcNow;
+            }
+            var json = JsonConvert.SerializeObject(store, Formatting.Indented);
             File.WriteAllText(Paths.TableSchemaPath, json);
         }
 
-        private static IssueSchemaConfig Normalize(IssueSchemaConfig cfg)
+        /// <summary>テーブル名で定義を検索する。</summary>
+        public static IssueSchemaConfig FindByTableName(TableSchemaStore store, string tableName)
+        {
+            if (store == null || string.IsNullOrWhiteSpace(tableName)) return null;
+            return store.Tables.FirstOrDefault(t =>
+                string.Equals(t.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>テーブル定義を追加または更新する。</summary>
+        public static void Upsert(TableSchemaStore store, IssueSchemaConfig config)
+        {
+            if (store == null || config == null) return;
+            Normalize(config);
+            var existing = store.Tables.FindIndex(t =>
+                string.Equals(t.TableName, config.TableName, StringComparison.OrdinalIgnoreCase));
+            if (existing >= 0)
+                store.Tables[existing] = config;
+            else
+                store.Tables.Add(config);
+        }
+
+        /// <summary>後方互換: 旧APIラッパー（最初のテーブル定義を返す）。</summary>
+        public static IssueSchemaConfig LoadOrCreate(Excel.Application app)
+        {
+            var store = LoadStore();
+            if (store.Tables.Count > 0) return store.Tables[0];
+            var def = CreateDefault(app);
+            store.Tables.Add(def);
+            SaveStore(store);
+            return def;
+        }
+
+        /// <summary>後方互換: 旧APIラッパー（単体保存）。</summary>
+        public static void Save(IssueSchemaConfig config)
+        {
+            var store = LoadStore();
+            Upsert(store, config);
+            SaveStore(store);
+        }
+
+        public static IssueSchemaConfig Normalize(IssueSchemaConfig cfg)
         {
             if (cfg == null) cfg = new IssueSchemaConfig();
             if (cfg.Columns == null) cfg.Columns = new List<IssueSchemaColumn>();
@@ -154,7 +210,7 @@ namespace ExcelChatAddin
             return cfg;
         }
 
-        private static IssueSchemaConfig CreateDefault(Excel.Application app)
+        public static IssueSchemaConfig CreateDefault(Excel.Application app)
         {
             var cfg = new IssueSchemaConfig();
             try
