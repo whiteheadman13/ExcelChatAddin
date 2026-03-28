@@ -38,6 +38,11 @@ namespace ExcelChatAddin
         private static readonly Regex RangeTagRegex =
             new Regex(@"@range\(\s*(?<sheet>[^,\)]+)\s*,\s*(?<addr>[^\)]+)\s*\)",
                 RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        // @table("課題表") / @table("リスク管理表")
+        private static readonly Regex TableTagRegex =
+            new Regex(@"@table\(\s*""(?<name>[^""]+)""\s*\)",
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
         private static Excel.Range TryResolveRangeFromText(Excel.Application app, string text)
         {
             if (app == null || string.IsNullOrWhiteSpace(text)) return null;
@@ -836,8 +841,10 @@ namespace ExcelChatAddin
 
             // collect referenced keys in input and in chat history
             var referencedKeys = new List<string>();
+            // テーブル名→参照キーのマップ（@table で参照されたテーブル名を記録）
+            var referencedTableNames = new List<string>();
 
-            // from current input
+            // from current input: @range tags
             foreach (Match m in RangeTagRegex.Matches(rawInput ?? ""))
             {
                 string sheet = m.Groups["sheet"].Value.Trim();
@@ -845,6 +852,17 @@ namespace ExcelChatAddin
                 string key = $"{sheet}!{addr}";
                 if (!referencedKeys.Exists(x => string.Equals(x, key, StringComparison.OrdinalIgnoreCase)))
                     referencedKeys.Add(key);
+            }
+
+            // from current input: @table tags → resolve to @range keys
+            foreach (Match m in TableTagRegex.Matches(rawInput ?? ""))
+            {
+                var tblName = m.Groups["name"].Value.Trim();
+                if (!referencedTableNames.Exists(x => string.Equals(x, tblName, StringComparison.OrdinalIgnoreCase)))
+                    referencedTableNames.Add(tblName);
+                var resolved = ResolveTableToRangeKey(tblName);
+                if (resolved != null && !referencedKeys.Exists(x => string.Equals(x, resolved, StringComparison.OrdinalIgnoreCase)))
+                    referencedKeys.Add(resolved);
             }
 
             // from chat history (recent)
@@ -856,6 +874,15 @@ namespace ExcelChatAddin
                 string key = $"{sheet}!{addr}";
                 if (!referencedKeys.Exists(x => string.Equals(x, key, StringComparison.OrdinalIgnoreCase)))
                     referencedKeys.Add(key);
+            }
+            foreach (Match m in TableTagRegex.Matches(historyForKeys ?? ""))
+            {
+                var tblName = m.Groups["name"].Value.Trim();
+                if (!referencedTableNames.Exists(x => string.Equals(x, tblName, StringComparison.OrdinalIgnoreCase)))
+                    referencedTableNames.Add(tblName);
+                var resolved = ResolveTableToRangeKey(tblName);
+                if (resolved != null && !referencedKeys.Exists(x => string.Equals(x, resolved, StringComparison.OrdinalIgnoreCase)))
+                    referencedKeys.Add(resolved);
             }
 
             // NOTE: do not auto-include implicit Selection/ActiveCell ranges.
@@ -923,7 +950,7 @@ namespace ExcelChatAddin
                 }
             }
 
-            // 2) chat history (replace inline ranges with refs so mapping is explicit)
+            // 2) chat history (replace inline ranges/tables with refs so mapping is explicit)
             string historyForSending = GetChatHistoryText(20);
             string historyWithRefs = historyForSending ?? "";
             foreach (Match m in RangeTagRegex.Matches(historyForSending ?? ""))
@@ -936,11 +963,20 @@ namespace ExcelChatAddin
                     historyWithRefs = historyWithRefs.Replace(m.Value, $"@range_ref(#{rid})");
                 }
             }
+            foreach (Match m in TableTagRegex.Matches(historyForSending ?? ""))
+            {
+                var tblName = m.Groups["name"].Value.Trim();
+                var resolved = ResolveTableToRangeKey(tblName);
+                if (resolved != null && workingMap.TryGetValue(resolved, out var rid))
+                {
+                    historyWithRefs = historyWithRefs.Replace(m.Value, $"@range_ref(#{rid})");
+                }
+            }
             sb.AppendLine("【チャット履歴（参考）】");
             sb.AppendLine(string.IsNullOrWhiteSpace(historyWithRefs) ? "(なし)" : MaskingEngine.Instance.Mask(historyWithRefs));
             sb.AppendLine();
 
-            // 3) input body: replace inline ranges with refs if mapped
+            // 3) input body: replace inline ranges/tables with refs if mapped
             string bodyWithRefs = rawInput ?? "";
             foreach (Match m in RangeTagRegex.Matches(rawInput ?? ""))
             {
@@ -948,6 +984,15 @@ namespace ExcelChatAddin
                 string addr = m.Groups["addr"].Value.Trim();
                 string key = $"{sheet}!{addr}";
                 if (workingMap.TryGetValue(key, out var rid))
+                {
+                    bodyWithRefs = bodyWithRefs.Replace(m.Value, $"@range_ref(#{rid})");
+                }
+            }
+            foreach (Match m in TableTagRegex.Matches(rawInput ?? ""))
+            {
+                var tblName = m.Groups["name"].Value.Trim();
+                var resolved = ResolveTableToRangeKey(tblName);
+                if (resolved != null && workingMap.TryGetValue(resolved, out var rid))
                 {
                     bodyWithRefs = bodyWithRefs.Replace(m.Value, $"@range_ref(#{rid})");
                 }
@@ -1319,7 +1364,7 @@ namespace ExcelChatAddin
         }
 
         // ----------------------------
-        // プレビュー：rangeだけ表示（クリック可能）
+        // プレビュー：range/tableを表示（クリック可能）
         // ----------------------------
         private void RenderPreview()
         {
@@ -1348,9 +1393,27 @@ namespace ExcelChatAddin
                 doc.Blocks.Add(p);
             }
 
+            foreach (Match m in TableTagRegex.Matches(text))
+            {
+                var tblName = m.Groups["name"].Value.Trim();
+                var p = new Paragraph { Margin = new Thickness(0) };
+                var link = new Hyperlink(new Run(m.Value)) { FontSize = 16 };
+                link.Click += (_, __) =>
+                {
+                    var resolved = ResolveTableToRangeKey(tblName);
+                    if (resolved != null)
+                    {
+                        var parts = resolved.Split('!');
+                        if (parts.Length == 2) _host?.SelectExcelRange(parts[0], parts[1]);
+                    }
+                };
+                p.Inlines.Add(link);
+                doc.Blocks.Add(p);
+            }
+
             if (doc.Blocks.Count == 0)
             {
-                doc.Blocks.Add(new Paragraph(new Run("（@range がまだありません）"))
+                doc.Blocks.Add(new Paragraph(new Run("（@range / @table がまだありません）"))
                 {
                     Margin = new Thickness(0)
                 });
@@ -1436,15 +1499,44 @@ namespace ExcelChatAddin
             try
             {
                 var item = SheetListBox?.SelectedItem as TableListItem;
-                if (item == null) return;
+                if (item == null || string.IsNullOrWhiteSpace(item.TableName)) return;
 
-                var token = $"@range({item.SheetName},{item.RangeAddress})";
+                var token = $"@table(\"{item.TableName}\")";
                 AppendText(token);
                 FocusInput();
             }
             catch
             {
             }
+        }
+
+        /// <summary>
+        /// @table("テーブル名") → "SheetName!A1:E20" 形式の参照キーに解決する。
+        /// </summary>
+        private static string ResolveTableToRangeKey(string tableName)
+        {
+            if (string.IsNullOrWhiteSpace(tableName)) return null;
+            try
+            {
+                var app = Globals.ThisAddIn?.Application;
+                var wb = app?.ActiveWorkbook;
+                if (wb == null) return null;
+
+                foreach (Excel.Worksheet ws in wb.Worksheets)
+                {
+                    if (ws.ListObjects == null) continue;
+                    foreach (Excel.ListObject lo in ws.ListObjects)
+                    {
+                        if (string.Equals(lo.Name, tableName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            var addr = lo.Range?.Address[false, false, Excel.XlReferenceStyle.xlA1] ?? "A1";
+                            return $"{ws.Name}!{addr}";
+                        }
+                    }
+                }
+            }
+            catch { }
+            return null;
         }
 
         private string BuildRangeTokenForSheet(string sheetName)
