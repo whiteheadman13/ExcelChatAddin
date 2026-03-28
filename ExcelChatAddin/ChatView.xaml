@@ -60,7 +60,7 @@
                 </Grid.ColumnDefinitions>
 
                 <TextBlock Grid.Row="0" Grid.Column="0"
-                           Text="シート一覧（ダブルクリックで @range(シート名,A1) を入力欄に追加）"
+                           Text="テーブル一覧（ダブルクリックで参照追加）"
                            FontSize="12"
                            Margin="0,0,6,4"/>
                 <Button Grid.Row="0" Grid.Column="1"

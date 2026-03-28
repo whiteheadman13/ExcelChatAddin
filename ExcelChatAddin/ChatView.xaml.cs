@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Input;
+using Newtonsoft.Json.Linq;
 using Excel = Microsoft.Office.Interop.Excel;
 
 namespace ExcelChatAddin
@@ -900,6 +901,17 @@ namespace ExcelChatAddin
                 }
             }
 
+            // ★ テーブル項目定義の同梱: 参照範囲に含まれるテーブル名に一致する定義があれば付加
+            try
+            {
+                var schemaSection = BuildSchemaSection(referencedKeys);
+                if (!string.IsNullOrWhiteSpace(schemaSection))
+                {
+                    sb.AppendLine(schemaSection);
+                }
+            }
+            catch { }
+
             // if committing, persist working map and next id and mark refs as sent
             if (commitMapping)
             {
@@ -965,6 +977,91 @@ namespace ExcelChatAddin
             }
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// 参照範囲に含まれるテーブル名に一致する定義があれば、LLM向けの項目定義セクションを構築する。
+        /// 一致しなければ空文字を返す。
+        /// </summary>
+        private string BuildSchemaSection(List<string> referencedKeys)
+        {
+            if (referencedKeys == null || referencedKeys.Count == 0) return "";
+
+            var app = Globals.ThisAddIn?.Application;
+            if (app?.ActiveWorkbook == null) return "";
+
+            IssueSchemaConfig schema = null;
+            try { schema = IssueSchemaManager.LoadOrCreate(app); } catch { }
+            if (schema == null || string.IsNullOrWhiteSpace(schema.TableName)) return "";
+            if (schema.Columns == null || schema.Columns.Count == 0) return "";
+
+            // 参照範囲内にスキーマのテーブルが含まれるか判定
+            bool matched = false;
+            try
+            {
+                var wb = app.ActiveWorkbook;
+                foreach (var key in referencedKeys)
+                {
+                    // key = "Sheet1!A1:E20"
+                    var parts = key.Split('!');
+                    if (parts.Length < 1) continue;
+                    var sheetName = parts[0];
+
+                    Excel.Worksheet ws = null;
+                    try { ws = wb.Worksheets[sheetName] as Excel.Worksheet; } catch { continue; }
+                    if (ws?.ListObjects == null) continue;
+
+                    foreach (Excel.ListObject lo in ws.ListObjects)
+                    {
+                        if (string.Equals(lo.Name, schema.TableName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (matched) break;
+                }
+            }
+            catch { }
+
+            if (!matched) return "";
+
+            // 一致したのでスキーマ定義をテキスト化
+            var sb2 = new StringBuilder();
+            sb2.AppendLine("【テーブル項目定義】");
+            sb2.AppendLine($"テーブル名: {schema.TableName}");
+            sb2.AppendLine($"ヘッダー行: {schema.HeaderRow}  データ開始行: {schema.DataStartRow}");
+            sb2.AppendLine($"キー列: {schema.KeyColumnLetter}");
+            sb2.AppendLine($"値ポリシー: {schema.ValuePolicy}");
+            sb2.AppendLine();
+            sb2.AppendLine("| 列位置 | 列名 | キー | 必須 | 型 | 値候補 | 記載例 |");
+            sb2.AppendLine("| --- | --- | --- | --- | --- | --- | --- |");
+            foreach (var c in schema.Columns)
+            {
+                var allowed = (c.AllowedValues != null && c.AllowedValues.Count > 0)
+                    ? string.Join(", ", c.AllowedValues) : "";
+                sb2.AppendLine($"| {c.ColumnLetter} | {c.ColumnName} | {(c.IsKey ? "○" : "")} | {(c.IsRequired ? "○" : "")} | {c.ValueType} | {allowed} | {c.ExampleValue} |");
+            }
+            sb2.AppendLine();
+            sb2.AppendLine("★ 回答は必ず以下のJSON形式で返してください。余計な説明は不要です。");
+            sb2.AppendLine("```json");
+            sb2.AppendLine("{");
+            sb2.AppendLine("  \"operations\": [");
+            sb2.AppendLine("    {");
+            sb2.AppendLine("      \"type\": \"upsert\",");
+            sb2.AppendLine("      \"key\": \"キー列の値\",");
+            sb2.AppendLine("      \"fields\": { \"列名1\": \"値1\", \"列名2\": \"値2\" }");
+            sb2.AppendLine("    }");
+            sb2.AppendLine("  ],");
+            sb2.AppendLine("  \"errors\": []");
+            sb2.AppendLine("}");
+            sb2.AppendLine("```");
+            sb2.AppendLine("- type は upsert/insert/update のいずれか。");
+            sb2.AppendLine("- fields には上記項目定義の列名のみ使用。定義外の列は禁止。");
+            sb2.AppendLine("- enum型の列は値候補のみ使用。違反がある場合は errors に理由を記載。");
+            sb2.AppendLine();
+
+            return sb2.ToString();
         }
 
         private void BtnSendPreview_Click(object sender, RoutedEventArgs e)
@@ -1338,11 +1435,10 @@ namespace ExcelChatAddin
         {
             try
             {
-                var sheetName = SheetListBox?.SelectedItem as string;
-                if (string.IsNullOrWhiteSpace(sheetName)) return;
-                if (sheetName.StartsWith("(", StringComparison.Ordinal)) return;
+                var item = SheetListBox?.SelectedItem as TableListItem;
+                if (item == null) return;
 
-                var token = BuildRangeTokenForSheet(sheetName);
+                var token = $"@range({item.SheetName},{item.RangeAddress})";
                 AppendText(token);
                 FocusInput();
             }
@@ -1393,57 +1489,71 @@ namespace ExcelChatAddin
             }
         }
 
+        private class TableListItem
+        {
+            public string TableName { get; set; }
+            public string SheetName { get; set; }
+            public string RangeAddress { get; set; }
+            public bool HasSchema { get; set; }
+
+            public override string ToString()
+            {
+                var schema = HasSchema ? " ★定義あり" : "";
+                return $"{TableName}  ({SheetName}!{RangeAddress}){schema}";
+            }
+        }
+
         private void RefreshSheetList()
         {
             try
             {
                 if (SheetListBox == null) return;
 
-                var prev = SheetListBox.SelectedItem as string;
                 var app = Globals.ThisAddIn?.Application;
+                var items = new List<TableListItem>();
 
-                var names = new List<string>();
-                string activeName = null;
+                // 定義済みテーブル名を取得
+                IssueSchemaConfig schema = null;
+                try { schema = IssueSchemaManager.LoadOrCreate(app); } catch { }
+                var schemaTableName = schema?.TableName ?? "";
 
                 if (app?.ActiveWorkbook != null)
                 {
-                    try
-                    {
-                        activeName = (app.ActiveSheet as Excel.Worksheet)?.Name;
-                    }
-                    catch
-                    {
-                        activeName = null;
-                    }
-
-                    int cnt = app.ActiveWorkbook.Worksheets.Count;
-                    for (int i = 1; i <= cnt; i++)
+                    var wb = app.ActiveWorkbook;
+                    foreach (Excel.Worksheet ws in wb.Worksheets)
                     {
                         try
                         {
-                            var ws = app.ActiveWorkbook.Worksheets[i] as Excel.Worksheet;
-                            if (ws != null && !string.IsNullOrWhiteSpace(ws.Name))
-                                names.Add(ws.Name);
+                            if (ws.ListObjects == null || ws.ListObjects.Count == 0) continue;
+                            foreach (Excel.ListObject lo in ws.ListObjects)
+                            {
+                                try
+                                {
+                                    var name = lo.Name ?? "";
+                                    var addr = lo.Range?.Address[false, false, Excel.XlReferenceStyle.xlA1] ?? "A1";
+                                    var hasSchema = string.Equals(name, schemaTableName, StringComparison.OrdinalIgnoreCase);
+                                    items.Add(new TableListItem
+                                    {
+                                        TableName = name,
+                                        SheetName = ws.Name,
+                                        RangeAddress = addr,
+                                        HasSchema = hasSchema
+                                    });
+                                }
+                                catch { }
+                            }
                         }
-                        catch
-                        {
-                        }
+                        catch { }
                     }
                 }
 
-                if (names.Count == 0)
+                if (items.Count == 0)
                 {
-                    names.Add("(シートなし)");
+                    items.Add(new TableListItem { TableName = "(テーブルなし)", SheetName = "", RangeAddress = "" });
                 }
 
-                SheetListBox.ItemsSource = names;
-
-                if (!string.IsNullOrWhiteSpace(prev) && names.Contains(prev))
-                    SheetListBox.SelectedItem = prev;
-                else if (!string.IsNullOrWhiteSpace(activeName) && names.Contains(activeName))
-                    SheetListBox.SelectedItem = activeName;
-                else if (names.Count > 0)
-                    SheetListBox.SelectedIndex = 0;
+                SheetListBox.ItemsSource = items;
+                if (items.Count > 0) SheetListBox.SelectedIndex = 0;
             }
             catch
             {
@@ -1466,16 +1576,39 @@ namespace ExcelChatAddin
                     return;
                 }
 
-                if (!TryExtractRowsForApply(responseText, relatedInputForApply, out var rows) || rows == null || rows.Count == 0)
-                {
-                    MessageBox.Show("回答または入力内容から反映データを抽出できませんでした。Markdown表/TSV、または A-001: ... 形式で指定してください。", "反映");
-                    return;
-                }
-
                 var app = Globals.ThisAddIn?.Application;
                 if (app == null)
                 {
                     MessageBox.Show("Excelアプリケーションにアクセスできません。", "反映");
+                    return;
+                }
+
+                // JSON operations 形式を優先
+                IssueSchemaConfig schema = null;
+                try { schema = IssueSchemaManager.LoadOrCreate(app); } catch { }
+
+                if (TryParseJsonOperations(responseText, schema, out var ops, out var errors))
+                {
+                    if (errors != null && errors.Count > 0)
+                    {
+                        MessageBox.Show("LLMが以下のエラーを報告しました:\n" + string.Join("\n", errors), "反映 - エラー");
+                    }
+
+                    if (ops == null || ops.Count == 0)
+                    {
+                        MessageBox.Show("反映対象の操作がありません。", "反映");
+                        return;
+                    }
+
+                    int applied = ApplyJsonOperations(app, schema, ops);
+                    MessageBox.Show($"反映しました。{applied} 行を更新/挿入しました。", "反映");
+                    return;
+                }
+
+                // フォールバック: Markdown表 / TSV / アクション行
+                if (!TryExtractRowsForApply(responseText, relatedInputForApply, out var rows) || rows == null || rows.Count == 0)
+                {
+                    MessageBox.Show("回答からデータを抽出できませんでした。JSON/Markdown表/TSV形式で再出力してください。", "反映");
                     return;
                 }
 
@@ -1493,6 +1626,164 @@ namespace ExcelChatAddin
             {
                 MessageBox.Show(ex.Message, "反映エラー");
             }
+        }
+
+        private bool TryParseJsonOperations(string text, IssueSchemaConfig schema, out List<JObject> operations, out List<string> errors)
+        {
+            operations = null;
+            errors = null;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            // JSON部分を抽出（```json ... ``` ブロックまたは { で始まる部分）
+            string jsonText = null;
+            var codeBlockMatch = Regex.Match(text, @"```(?:json)?\s*\n?([\s\S]*?)```", RegexOptions.IgnoreCase);
+            if (codeBlockMatch.Success)
+            {
+                jsonText = codeBlockMatch.Groups[1].Value.Trim();
+            }
+            else
+            {
+                // { で始まる最初のJSONブロックを探す
+                int braceStart = text.IndexOf('{');
+                if (braceStart >= 0)
+                {
+                    jsonText = text.Substring(braceStart);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(jsonText)) return false;
+
+            try
+            {
+                var root = JObject.Parse(jsonText);
+                var opsArray = root["operations"] as JArray;
+                if (opsArray == null || opsArray.Count == 0) return false;
+
+                operations = opsArray.OfType<JObject>().ToList();
+
+                var errArray = root["errors"] as JArray;
+                if (errArray != null && errArray.Count > 0)
+                {
+                    errors = errArray.Select(e => e.ToString()).ToList();
+                }
+
+                return operations.Count > 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private int ApplyJsonOperations(Excel.Application app, IssueSchemaConfig schema, List<JObject> operations)
+        {
+            if (schema == null || string.IsNullOrWhiteSpace(schema.TableName)) return 0;
+            if (schema.Columns == null || schema.Columns.Count == 0) return 0;
+
+            // テーブルを検索
+            Excel.ListObject targetTable = null;
+            Excel.Worksheet ws = null;
+            var wb = app.ActiveWorkbook;
+            if (wb == null) return 0;
+
+            foreach (Excel.Worksheet sheet in wb.Worksheets)
+            {
+                if (sheet.ListObjects == null) continue;
+                foreach (Excel.ListObject lo in sheet.ListObjects)
+                {
+                    if (string.Equals(lo.Name, schema.TableName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        targetTable = lo;
+                        ws = sheet;
+                        break;
+                    }
+                }
+                if (targetTable != null) break;
+            }
+
+            if (targetTable == null || ws == null) return 0;
+
+            // 列名→列インデックスのマップを構築
+            var colMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var c in schema.Columns)
+            {
+                int idx = ColumnLetterToIndex(c.ColumnLetter);
+                if (idx > 0) colMap[c.ColumnName] = idx;
+            }
+
+            var keyCol = schema.Columns.FirstOrDefault(c => c.IsKey);
+            if (keyCol == null) return 0;
+            int keyColIdx = ColumnLetterToIndex(keyCol.ColumnLetter);
+            if (keyColIdx <= 0) return 0;
+
+            int applied = 0;
+
+            foreach (var op in operations)
+            {
+                try
+                {
+                    var keyValue = (op["key"]?.ToString() ?? "").Trim();
+                    var fields = op["fields"] as JObject;
+                    if (string.IsNullOrWhiteSpace(keyValue) || fields == null) continue;
+
+                    // 既存行を検索
+                    int targetRow = -1;
+                    int dataStart = schema.DataStartRow;
+                    int lastRow = ws.Cells[ws.Rows.Count, keyColIdx].End[Excel.XlDirection.xlUp].Row;
+
+                    for (int r = dataStart; r <= lastRow; r++)
+                    {
+                        var cellVal = Convert.ToString((ws.Cells[r, keyColIdx] as Excel.Range)?.Value2) ?? "";
+                        if (string.Equals(cellVal.Trim(), keyValue, StringComparison.OrdinalIgnoreCase))
+                        {
+                            targetRow = r;
+                            break;
+                        }
+                    }
+
+                    var opType = (op["type"]?.ToString() ?? "upsert").ToLowerInvariant();
+
+                    if (targetRow < 0 && (opType == "upsert" || opType == "insert"))
+                    {
+                        // 新規行: テーブル末尾の次
+                        targetRow = lastRow + 1;
+                        (ws.Cells[targetRow, keyColIdx] as Excel.Range).Value2 = keyValue;
+                    }
+                    else if (targetRow < 0)
+                    {
+                        continue; // update だが行が見つからない
+                    }
+
+                    // fields を書き込み
+                    foreach (var prop in fields.Properties())
+                    {
+                        if (colMap.TryGetValue(prop.Name, out int colIdx))
+                        {
+                            (ws.Cells[targetRow, colIdx] as Excel.Range).Value2 = prop.Value?.ToString() ?? "";
+                        }
+                    }
+
+                    applied++;
+                }
+                catch { }
+            }
+
+            // テーブル範囲を拡張（新規行がある場合）
+            try { targetTable.Resize(targetTable.Range.Resize[targetTable.Range.Rows.Count, targetTable.Range.Columns.Count]); } catch { }
+
+            return applied;
+        }
+
+        private static int ColumnLetterToIndex(string letter)
+        {
+            if (string.IsNullOrWhiteSpace(letter)) return 0;
+            int index = 0;
+            foreach (var ch in letter.Trim().ToUpperInvariant())
+            {
+                if (ch < 'A' || ch > 'Z') return 0;
+                index = index * 26 + (ch - 'A' + 1);
+            }
+            return index;
         }
 
         private Excel.Range TryResolveApplyStartCell(Excel.Application app, string relatedInputForApply)

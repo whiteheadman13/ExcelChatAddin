@@ -11,7 +11,7 @@ namespace ExcelChatAddin
     {
         private readonly Excel.Application _excelApp;
 
-        private TextBox _txtSheetName;
+        private ComboBox _cmbTableName;
         private NumericUpDown _numHeaderRow;
         private NumericUpDown _numDataStartRow;
         private DataGridView _grid;
@@ -31,9 +31,15 @@ namespace ExcelChatAddin
 
             var top = new Panel { Dock = DockStyle.Top, Height = 88 };
 
-            top.Controls.Add(new Label { Text = "対象シート:", AutoSize = true, Location = new Point(12, 14) });
-            _txtSheetName = new TextBox { Location = new Point(84, 10), Width = 220 };
-            top.Controls.Add(_txtSheetName);
+            top.Controls.Add(new Label { Text = "対象テーブル名:", AutoSize = true, Location = new Point(12, 14) });
+            _cmbTableName = new ComboBox
+            {
+                Location = new Point(105, 10),
+                Width = 220,
+                DropDownStyle = ComboBoxStyle.DropDown
+            };
+            top.Controls.Add(_cmbTableName);
+            PopulateTableNames();
 
             top.Controls.Add(new Label { Text = "ヘッダー行:", AutoSize = true, Location = new Point(330, 14) });
             _numHeaderRow = new NumericUpDown { Location = new Point(400, 10), Width = 80, Minimum = 1, Maximum = 100000, Value = 1 };
@@ -122,7 +128,21 @@ namespace ExcelChatAddin
         {
             var cfg = IssueSchemaManager.LoadOrCreate(_excelApp);
 
-            _txtSheetName.Text = cfg.SheetName ?? "";
+            var tableName = !string.IsNullOrWhiteSpace(cfg.TableName) ? cfg.TableName : (cfg.SheetName ?? "");
+            // ComboBoxの候補に一致する項目があれば選択、なければテキスト直接設定
+            bool found = false;
+            for (int i = 0; i < _cmbTableName.Items.Count; i++)
+            {
+                var itemText = _cmbTableName.Items[i].ToString();
+                if (itemText.StartsWith(tableName + "  (", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(itemText, tableName, StringComparison.OrdinalIgnoreCase))
+                {
+                    _cmbTableName.SelectedIndex = i;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) _cmbTableName.Text = tableName;
             _numHeaderRow.Value = Math.Max(1, cfg.HeaderRow);
             _numDataStartRow.Value = Math.Max(1, cfg.DataStartRow);
 
@@ -166,10 +186,14 @@ namespace ExcelChatAddin
             {
                 _grid.EndEdit();
 
-                var sheetName = (_txtSheetName.Text ?? "").Trim();
-                if (string.IsNullOrWhiteSpace(sheetName))
+                var rawTableName = (_cmbTableName.Text ?? "").Trim();
+                // ComboBox表示は "テーブル名  (シート名)" 形式の場合がある
+                var tableName = rawTableName;
+                var parenIdx = rawTableName.IndexOf("  (", StringComparison.Ordinal);
+                if (parenIdx > 0) tableName = rawTableName.Substring(0, parenIdx).Trim();
+                if (string.IsNullOrWhiteSpace(tableName))
                 {
-                    MessageBox.Show("対象シート名を入力してください。");
+                    MessageBox.Show("対象テーブル名を入力または選択してください。");
                     return;
                 }
 
@@ -251,7 +275,8 @@ namespace ExcelChatAddin
 
                 var cfg = new IssueSchemaConfig
                 {
-                    SheetName = sheetName,
+                    TableName = tableName,
+                    SheetName = tableName,
                     HeaderRow = headerRow,
                     DataStartRow = dataStartRow,
                     ValuePolicy = "strict",
@@ -279,21 +304,42 @@ namespace ExcelChatAddin
             var wb = _excelApp.ActiveWorkbook;
             if (wb == null) return;
 
+            // テーブル名で既存テーブルを検索
+            Excel.ListObject existingTable = null;
             Excel.Worksheet ws = null;
             try
             {
-                ws = wb.Worksheets[cfg.SheetName] as Excel.Worksheet;
+                foreach (Excel.Worksheet sheet in wb.Worksheets)
+                {
+                    if (sheet.ListObjects == null) continue;
+                    foreach (Excel.ListObject lo in sheet.ListObjects)
+                    {
+                        if (string.Equals(lo.Name, cfg.TableName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            existingTable = lo;
+                            ws = sheet;
+                            break;
+                        }
+                    }
+                    if (existingTable != null) break;
+                }
             }
-            catch
+            catch { }
+
+            // 既にテーブルがあれば何もしない
+            if (existingTable != null) return;
+
+            // シート名が SheetName に指定されていればそこに作る（旧互換）
+            if (ws == null && !string.IsNullOrWhiteSpace(cfg.SheetName))
             {
-                ws = null;
+                try { ws = wb.Worksheets[cfg.SheetName] as Excel.Worksheet; } catch { ws = null; }
             }
 
             if (ws == null)
             {
                 ws = wb.Worksheets.Add() as Excel.Worksheet;
                 if (ws == null) return;
-                ws.Name = cfg.SheetName;
+                try { ws.Name = cfg.TableName; } catch { }
             }
 
             int minCol = cfg.Columns.Min(c => ColumnLetterToIndex(c.ColumnLetter));
@@ -340,7 +386,7 @@ namespace ExcelChatAddin
 
                 if (lo != null)
                 {
-                    try { lo.Name = "TableSchemaData"; } catch { }
+                    try { lo.Name = cfg.TableName ?? "Table1"; } catch { }
                 }
             }
             catch
@@ -359,6 +405,39 @@ namespace ExcelChatAddin
                 index = index * 26 + (ch - 'A' + 1);
             }
             return index;
+        }
+
+        private void PopulateTableNames()
+        {
+            try
+            {
+                _cmbTableName.Items.Clear();
+
+                var wb = _excelApp?.ActiveWorkbook;
+                if (wb == null) return;
+
+                foreach (Excel.Worksheet ws in wb.Worksheets)
+                {
+                    try
+                    {
+                        if (ws.ListObjects == null || ws.ListObjects.Count == 0) continue;
+                        foreach (Excel.ListObject lo in ws.ListObjects)
+                        {
+                            try
+                            {
+                                var name = lo.Name;
+                                if (!string.IsNullOrWhiteSpace(name))
+                                {
+                                    _cmbTableName.Items.Add($"{name}  ({ws.Name})");
+                                }
+                            }
+                            catch { }
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
         }
     }
 }

@@ -3,6 +3,37 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (JSON operations形式でのLLM応答と反映)
+- 事象:
+  1. LLMがCSV/テキスト形式で返すため反映時に全データが1列に入ってしまう
+  2. 項目定義を送っているのにJSON出力指示がない
+- 修正内容:
+  1. `BuildSchemaSection` にJSON出力フォーマット指示を追加（operations/key/fields/errors）
+  2. `TryParseJsonOperations` を追加: ```json``` ブロックまたは `{` で始まるJSONを抽出・パース
+  3. `ApplyJsonOperations` を追加: スキーマの列名→列インデックスでマッピングし、キー列で既存行検索→upsert/insert/update
+  4. `ApplyResponseToSheet` をJSON優先→Markdown/TSVフォールバックの2段構えに変更
+- 対象モジュール:
+  - `ExcelChatAddin/ChatView.xaml.cs`
+
+## Session Update (テーブル一覧UIへの変更と項目定義のLLM送信)
+- 事象:
+  1. シート一覧ではなくテーブル一覧を表示したい
+  2. テーブル名に一致する定義がある場合のみ、その定義をLLMに送信したい
+  3. 表設定画面も「対象シート」→「対象テーブル名」に変更したい
+- 修正内容:
+  1. ChatView UIを「テーブル一覧」に変更（ListObject.Name + シート名 + 範囲を表示）
+  2. 定義ありテーブルに「★定義あり」を表示
+  3. ダブルクリックで `@range(シート名,テーブル範囲)` を入力欄に挿入
+  4. `BuildMaskedPayload` に `BuildSchemaSection` を追加: 参照範囲内のテーブル名と定義が一致する場合のみ項目定義をペイロードに同梱
+  5. `IssueSchemaConfig` に `TableName` プロパティを追加（旧 `SheetName` と後方互換）
+  6. `IssueSchemaSettingsDialog` のラベルを「対象テーブル名」に変更
+  7. `EnsureTableIfMissing` をテーブル名ベースの検索に変更
+- 対象モジュール:
+  - `ExcelChatAddin/ChatView.xaml`
+  - `ExcelChatAddin/ChatView.xaml.cs`
+  - `ExcelChatAddin/IssueSchemaConfig.cs`
+  - `ExcelChatAddin/IssueSchemaSettingsDialog.cs`
+
 ## Session Update (シート指定時に全表範囲を送付し、反映を回答単位に変更)
 - 事象:
   1. シート一覧ダブルクリックで `@range(Sheet,A1)` ではなく表全体を送りたい

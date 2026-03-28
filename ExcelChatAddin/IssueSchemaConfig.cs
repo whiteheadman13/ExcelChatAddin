@@ -20,7 +20,15 @@ namespace ExcelChatAddin
 
     public class IssueSchemaConfig
     {
-        public string SheetName { get; set; } = "Sheet1";
+        /// <summary>
+        /// テーブル名（Excel ListObject.Name）。旧 SheetName との互換を維持。
+        /// </summary>
+        [Newtonsoft.Json.JsonProperty("TableName")]
+        public string TableName { get; set; } = "";
+
+        /// <summary>旧JSONとの後方互換用。読込時に TableName が空なら SheetName を採用する。</summary>
+        [Newtonsoft.Json.JsonProperty("SheetName")]
+        public string SheetName { get; set; } = "";
         public int HeaderRow { get; set; } = 1;
         public int DataStartRow { get; set; } = 2;
         public string ValuePolicy { get; set; } = "strict";
@@ -136,7 +144,12 @@ namespace ExcelChatAddin
                 cfg.KeyColumnLetter = key.ColumnLetter;
             }
 
-            if (string.IsNullOrWhiteSpace(cfg.SheetName)) cfg.SheetName = "Sheet1";
+            // 旧JSON互換: TableNameが空でSheetNameがあればTableNameへ移行
+            if (string.IsNullOrWhiteSpace(cfg.TableName) && !string.IsNullOrWhiteSpace(cfg.SheetName))
+            {
+                cfg.TableName = cfg.SheetName;
+            }
+            if (string.IsNullOrWhiteSpace(cfg.TableName)) cfg.TableName = "Table1";
 
             return cfg;
         }
@@ -147,11 +160,15 @@ namespace ExcelChatAddin
             try
             {
                 var ws = app?.ActiveSheet as Excel.Worksheet;
-                if (ws != null) cfg.SheetName = ws.Name;
+                if (ws != null && ws.ListObjects != null && ws.ListObjects.Count > 0)
+                {
+                    cfg.TableName = ws.ListObjects.Item[1].Name ?? "Table1";
+                }
             }
             catch
             {
             }
+            if (string.IsNullOrWhiteSpace(cfg.TableName)) cfg.TableName = "Table1";
 
             cfg.Columns = new List<IssueSchemaColumn>
             {
