@@ -55,6 +55,14 @@ namespace ExcelChatAddin
         public static string TemplatesPath
             => Path.Combine(DataDir, "diagram_templates.json");
 
+        // 新規（汎用）
+        public static string TableSchemaPath
+            => Path.Combine(DataDir, "table_schema.json");
+
+        // 旧名（後方互換）
+        public static string IssueSchemaPath
+            => Path.Combine(DataDir, "issue_schema.json");
+
         public static string RulesPath
             => Path.Combine(DataDir, "rules.json");
 

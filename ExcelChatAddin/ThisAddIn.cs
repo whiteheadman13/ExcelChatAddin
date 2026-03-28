@@ -488,6 +488,27 @@ namespace ExcelChatAddin
             }
         }
 
+        public void ShowTableSchemaSettings()
+        {
+            try
+            {
+                var owner = new Win32Window(new IntPtr(this.Application.Hwnd));
+                using (var dlg = new IssueSchemaSettingsDialog(this.Application))
+                {
+                    dlg.ShowDialog(owner);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "表設定");
+            }
+        }
+
+        public void ShowIssueSchemaSettings()
+        {
+            // 既存呼び出し互換
+            ShowTableSchemaSettings();
+        }
 
 
 

@@ -3,6 +3,46 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (表設定保存時に未作成テーブルを自動作成)
+- 事象: 表設定の保存時、対象シートに表が未作成なら自動で作成したい。
+- 修正内容:
+  1. 保存後に `EnsureTableIfMissing` を実行
+  2. 対象シートが無ければ新規作成
+  3. ヘッダー未作成時のみ列名ヘッダーを書き込み
+  4. ListObject が無い場合に Excel テーブルを自動作成
+- 対象モジュール:
+  - `ExcelChatAddin/IssueSchemaSettingsDialog.cs`
+
+## Session Update (課題設定を汎用の表設定へ名称・保存先を変更)
+- 事象: 表更新機能は課題管理表に限定しないため、UI文言と設定保存先を汎用化したい。
+- 修正内容:
+  1. リボンボタン文言を「課題設定」から「表設定」へ変更
+  2. `ThisAddIn` に `ShowTableSchemaSettings()` を追加し、既存 `ShowIssueSchemaSettings()` は互換ラッパー化
+  3. 設定画面タイトルを「表スキーマ設定」に変更
+  4. 保存先を `table_schema.json` 優先に変更し、既存 `issue_schema.json` を互換読み込み・移行保存
+- 対象モジュール:
+  - `ExcelChatAddin/ChatRibbon.cs`
+  - `ExcelChatAddin/ThisAddIn.cs`
+  - `ExcelChatAddin/IssueSchemaSettingsDialog.cs`
+  - `ExcelChatAddin/IssueSchemaConfig.cs`
+  - `ExcelChatAddin/Paths.cs`
+
+## Session Update (リボンから課題設定画面を起動し、issue_schema.jsonを作成)
+- 事象: 課題管理表スキーマをユーザーが設定できる画面をリボンから起動したい。
+- 修正内容:
+  1. `ChatRibbon` に「課題設定」ボタンを追加し、設定画面を起動
+  2. `ThisAddIn` に `ShowIssueSchemaSettings()` を追加
+  3. `IssueSchemaSettingsDialog` を追加（列名/列位置/キー列/値候補/記載例を編集）
+  4. `IssueSchemaManager` を追加し `issue_schema.json` を作成・保存
+  5. `Paths` に `IssueSchemaPath` を追加
+- 対象モジュール:
+  - `ExcelChatAddin/ChatRibbon.cs`
+  - `ExcelChatAddin/ThisAddIn.cs`
+  - `ExcelChatAddin/IssueSchemaSettingsDialog.cs`
+  - `ExcelChatAddin/IssueSchemaConfig.cs`
+  - `ExcelChatAddin/Paths.cs`
+  - `ExcelChatAddin/ExcelChatAddin.csproj`
+
 ## Session Update (用語登録画面の分類登録をチェックボックス判断へ変更)
 - 事象: 用語登録画面で、分類履歴への保存有無をチェックボックスで判断したい。
 - 参照元:
