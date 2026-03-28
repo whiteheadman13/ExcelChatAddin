@@ -31,6 +31,9 @@ namespace ExcelChatAddin
         // 履歴/入力クリア後に Selection を自動で送らないようにするフラグ
         private bool _suppressSelectionFallback = false;
 
+        // 更新対象テーブル名（未選択の場合は null/空）
+        private string _selectedUpdateTable = null;
+
         // ★まだUIが生成されていないタイミングで AppendText された分を溜める
         private readonly List<string> _pendingAppends = new List<string>();
 
@@ -1604,10 +1607,17 @@ namespace ExcelChatAddin
                 var app = Globals.ThisAddIn?.Application;
                 var items = new List<TableListItem>();
 
-                // 定義済みテーブル名を取得
-                IssueSchemaConfig schema = null;
-                try { schema = IssueSchemaManager.LoadOrCreate(app); } catch { }
-                var schemaTableName = schema?.TableName ?? "";
+                // 定義済みテーブル名一覧を取得（複数対応）
+                TableSchemaStore store = null;
+                try { store = IssueSchemaManager.LoadStore(); } catch { }
+                var definedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (store != null)
+                {
+                    foreach (var t in store.Tables)
+                    {
+                        if (!string.IsNullOrWhiteSpace(t.TableName)) definedNames.Add(t.TableName);
+                    }
+                }
 
                 if (app?.ActiveWorkbook != null)
                 {
@@ -1623,7 +1633,7 @@ namespace ExcelChatAddin
                                 {
                                     var name = lo.Name ?? "";
                                     var addr = lo.Range?.Address[false, false, Excel.XlReferenceStyle.xlA1] ?? "A1";
-                                    var hasSchema = string.Equals(name, schemaTableName, StringComparison.OrdinalIgnoreCase);
+                                    var hasSchema = definedNames.Contains(name);
                                     items.Add(new TableListItem
                                     {
                                         TableName = name,
@@ -1646,10 +1656,53 @@ namespace ExcelChatAddin
 
                 SheetListBox.ItemsSource = items;
                 if (items.Count > 0) SheetListBox.SelectedIndex = 0;
+
+                // 更新対象ComboBoxを更新
+                RefreshUpdateTargetComboBox(items);
             }
             catch
             {
             }
+        }
+
+        private void RefreshUpdateTargetComboBox(List<TableListItem> items)
+        {
+            try
+            {
+                if (cmbUpdateTarget == null) return;
+                var prev = _selectedUpdateTable;
+
+                cmbUpdateTarget.Items.Clear();
+                cmbUpdateTarget.Items.Add("（未選択）");
+
+                foreach (var item in items)
+                {
+                    if (!string.IsNullOrWhiteSpace(item.TableName) && item.TableName != "(テーブルなし)")
+                        cmbUpdateTarget.Items.Add(item.TableName);
+                }
+
+                // 以前の選択を復元
+                if (!string.IsNullOrWhiteSpace(prev))
+                {
+                    int idx = cmbUpdateTarget.Items.IndexOf(prev);
+                    cmbUpdateTarget.SelectedIndex = idx >= 0 ? idx : 0;
+                }
+                else
+                {
+                    cmbUpdateTarget.SelectedIndex = 0;
+                }
+            }
+            catch { }
+        }
+
+        private void CmbUpdateTarget_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            try
+            {
+                var selected = cmbUpdateTarget?.SelectedItem as string;
+                _selectedUpdateTable = (selected != null && selected != "（未選択）") ? selected : null;
+            }
+            catch { }
         }
 
         private void BtnApplyToSheet_Click(object sender, RoutedEventArgs e)
