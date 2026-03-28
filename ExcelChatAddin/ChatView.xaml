@@ -5,9 +5,11 @@
              MinHeight="200">
 
     <Grid Margin="8">
-            <Grid.RowDefinitions>
+        <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <!-- ヘッダ -->
+            <RowDefinition Height="Auto"/>
+            <!-- シート一覧 -->
             <RowDefinition Height="*"/>
             <!-- チャット履歴 -->
             <RowDefinition Height="Auto"/>
@@ -35,13 +37,56 @@
                 <!-- removed: 表形式で表示 (use input-area checkbox instead) -->
                 <Button Content="クリア履歴" Width="80" Height="24" Click="ClearHistory_Click" ToolTip="チャット履歴をクリア" Margin="0,0,6,0"/>
                 <Button Content="再解析" Width="80" Height="24" Click="ReparseHistory_Click" ToolTip="履歴を再解析して表を検出表示" Margin="0,0,6,0"/>
+                <Button x:Name="btnApplyToSheet"
+                        Content="反映"
+                        Width="80"
+                        Height="24"
+                        Click="BtnApplyToSheet_Click"
+                        ToolTip="直近のGemini回答をシートへ反映"/>
             </StackPanel>
         </Grid>
 
         <!-- ============================= -->
-        <!-- チャット履歴（表示専用） -->
+        <!-- シート一覧 -->
         <!-- ============================= -->
         <Border Grid.Row="1"
+                Margin="0,0,0,6"
+                Background="#FFF8F8F8"
+                BorderBrush="#FFDDDDDD"
+                BorderThickness="1"
+                Padding="6">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0"
+                           Text="シート一覧（ダブルクリックで @range(シート名,A1) を入力欄に追加）"
+                           FontSize="12"
+                           Margin="0,0,6,4"/>
+                <Button Grid.Row="0" Grid.Column="1"
+                        Content="一覧を更新"
+                        Width="90"
+                        Height="24"
+                        Click="BtnRefreshSheets_Click"/>
+
+                <ListBox x:Name="SheetListBox"
+                         Grid.Row="1"
+                         Grid.ColumnSpan="2"
+                         Height="72"
+                         MouseDoubleClick="SheetListBox_MouseDoubleClick"/>
+            </Grid>
+        </Border>
+
+        <!-- ============================= -->
+        <!-- チャット履歴（表示専用） -->
+        <!-- ============================= -->
+        <Border Grid.Row="2"
                 Margin="0,0,0,6"
                 Background="#FFF8F8F8"
                 BorderBrush="#FFCCCCCC"
@@ -56,7 +101,7 @@
         <!-- ============================= -->
         <!-- マスキング操作（入力欄の上：右寄せ） -->
         <!-- ============================= -->
-        <Grid Grid.Row="2" Margin="0,0,0,4">
+        <Grid Grid.Row="3" Margin="0,0,0,4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -88,7 +133,7 @@
         <!-- マスキングプレビュー（表示専用） -->
         <!-- ============================= -->
         <RichTextBox x:Name="PreviewBox"
-                     Grid.Row="3"
+                     Grid.Row="4"
                      Height="28"
                      IsReadOnly="True"
                      IsDocumentEnabled="True"
@@ -100,7 +145,7 @@
         <!-- ============================= -->
         <!-- 入力欄 ＋ Gemini送信（入力右） -->
         <!-- ============================= -->
-        <Grid Grid.Row="4" Margin="0,6,0,0">
+        <Grid Grid.Row="5" Margin="0,6,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>

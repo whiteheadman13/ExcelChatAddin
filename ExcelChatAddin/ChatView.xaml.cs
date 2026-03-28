@@ -17,6 +17,8 @@ namespace ExcelChatAddin
         // 以前の "チャット上の表形式表示" は廃止。入力欄側のワンショット指定を使用します。
         private bool _requestTableForNextSend = false;
         private string _selectedModel = "gemini-3.1-flash-lite-preview";
+        private string _lastGeminiResponse = "";
+        private string _lastSentRawInput = "";
 
         private TaskPaneHost _host;
         // 範囲の送信マッピング（セッション内で重複送信を避けるため）
@@ -366,6 +368,8 @@ namespace ExcelChatAddin
                     _pendingAppends.Clear();
                 }
 
+                RefreshSheetList();
+
                 // 初期プレビュー
                 RenderPreview();
             };
@@ -405,6 +409,7 @@ namespace ExcelChatAddin
 
                 // 表示は入力欄の内容のみを表示する（参照データはペイロードで送付するためチャット欄には重複表示しない）
                 var shown = raw;
+                _lastSentRawInput = raw;
 
                 Dispatcher.Invoke(() =>
                 {
@@ -444,12 +449,17 @@ namespace ExcelChatAddin
 
                 // 受信したレスポンスをアンマスクしてから表示する
                 var unmaskedResponse = MaskingEngine.Instance.Unmask(response);
+                _lastGeminiResponse = unmaskedResponse ?? "";
 
                 Dispatcher.Invoke(() =>
                 {
                     AppendChat("Gemini", unmaskedResponse);
                     btnSendGemini.IsEnabled = true;
                 });
+
+                // 最後の送信内容と応答を保持
+                _lastSentRawInput = raw;
+                _lastGeminiResponse = unmaskedResponse;
             }
             catch (Exception ex)
             {
@@ -1306,6 +1316,263 @@ namespace ExcelChatAddin
             {
                 MessageBox.Show(ex.Message, "テンプレート");
             }
+        }
+
+        private void BtnRefreshSheets_Click(object sender, RoutedEventArgs e)
+        {
+            RefreshSheetList();
+        }
+
+        private void SheetListBox_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            try
+            {
+                var sheetName = SheetListBox?.SelectedItem as string;
+                if (string.IsNullOrWhiteSpace(sheetName)) return;
+                if (sheetName.StartsWith("(", StringComparison.Ordinal)) return;
+
+                AppendText($"@range({sheetName},A1)");
+                FocusInput();
+            }
+            catch
+            {
+            }
+        }
+
+        private void RefreshSheetList()
+        {
+            try
+            {
+                if (SheetListBox == null) return;
+
+                var prev = SheetListBox.SelectedItem as string;
+                var app = Globals.ThisAddIn?.Application;
+
+                var names = new List<string>();
+                string activeName = null;
+
+                if (app?.ActiveWorkbook != null)
+                {
+                    try
+                    {
+                        activeName = (app.ActiveSheet as Excel.Worksheet)?.Name;
+                    }
+                    catch
+                    {
+                        activeName = null;
+                    }
+
+                    int cnt = app.ActiveWorkbook.Worksheets.Count;
+                    for (int i = 1; i <= cnt; i++)
+                    {
+                        try
+                        {
+                            var ws = app.ActiveWorkbook.Worksheets[i] as Excel.Worksheet;
+                            if (ws != null && !string.IsNullOrWhiteSpace(ws.Name))
+                                names.Add(ws.Name);
+                        }
+                        catch
+                        {
+                        }
+                    }
+                }
+
+                if (names.Count == 0)
+                {
+                    names.Add("(シートなし)");
+                }
+
+                SheetListBox.ItemsSource = names;
+
+                if (!string.IsNullOrWhiteSpace(prev) && names.Contains(prev))
+                    SheetListBox.SelectedItem = prev;
+                else if (!string.IsNullOrWhiteSpace(activeName) && names.Contains(activeName))
+                    SheetListBox.SelectedItem = activeName;
+                else if (names.Count > 0)
+                    SheetListBox.SelectedIndex = 0;
+            }
+            catch
+            {
+            }
+        }
+
+        private void BtnApplyToSheet_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(_lastGeminiResponse))
+                {
+                    MessageBox.Show("反映対象の回答がありません。先に送信してください。", "反映");
+                    return;
+                }
+
+                if (!TryExtractRowsForApply(_lastGeminiResponse, out var rows) || rows == null || rows.Count == 0)
+                {
+                    MessageBox.Show("回答または入力内容から反映データを抽出できませんでした。Markdown表/TSV、または A-001: ... 形式で指定してください。", "反映");
+                    return;
+                }
+
+                var app = Globals.ThisAddIn?.Application;
+                if (app == null)
+                {
+                    MessageBox.Show("Excelアプリケーションにアクセスできません。", "反映");
+                    return;
+                }
+
+                Excel.Range startCell = TryResolveApplyStartCell(app);
+                if (startCell == null)
+                {
+                    MessageBox.Show("反映先セルを特定できません。", "反映");
+                    return;
+                }
+
+                WriteRowsToSheet(startCell, rows);
+                MessageBox.Show($"反映しました。{rows.Count}行 x {rows.Max(r => r?.Length ?? 0)}列", "反映");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "反映エラー");
+            }
+        }
+
+        private Excel.Range TryResolveApplyStartCell(Excel.Application app)
+        {
+            try
+            {
+                var fromInput = TryResolveRangeFromText(app, _lastSentRawInput ?? "");
+                if (fromInput != null) return fromInput.Cells[1, 1] as Excel.Range;
+            }
+            catch { }
+
+            try
+            {
+                var sel = app.Selection as Excel.Range;
+                if (sel != null) return sel.Cells[1, 1] as Excel.Range;
+            }
+            catch { }
+
+            try
+            {
+                return app.ActiveCell as Excel.Range;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private bool TryExtractRowsForApply(string text, out List<string[]> rows)
+        {
+            rows = null;
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            // 1) Markdown / TSV
+            if (TryParseMarkdownTable(text, out var parsed) && parsed != null && parsed.Count > 0)
+            {
+                rows = parsed;
+                return true;
+            }
+
+            // 2) 箇条書きアクション行（A-001: 田中 / 作業 / 期限 2026-04-05）
+            if (TryParseActionLines(text, out var actionRows) && actionRows.Count > 0)
+            {
+                rows = actionRows;
+                return true;
+            }
+
+            // 3) Gemini回答が曖昧な場合は、直近入力本文からも救済抽出
+            if (TryParseActionLines(_lastSentRawInput ?? "", out actionRows) && actionRows.Count > 0)
+            {
+                rows = actionRows;
+                return true;
+            }
+
+            // 4) 単一列 fallback
+            var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => (x ?? "").Trim())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToList();
+
+            var oneCol = lines.Where(x => !x.Contains("更新します") && !x.EndsWith("。", StringComparison.Ordinal)).ToList();
+            if (oneCol.Count >= 2)
+            {
+                rows = oneCol.Select(x => new[] { x }).ToList();
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool TryParseActionLines(string text, out List<string[]> rows)
+        {
+            rows = new List<string[]>();
+            if (string.IsNullOrWhiteSpace(text)) return false;
+
+            var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => (x ?? "").Trim())
+                .ToList();
+
+            // 例: A-001: 田中 / マクロ初版作成 / 期限 2026-04-05
+            var re = new Regex(@"^[\-・\*\s]*(?<id>[A-Za-z]+[-_]?\d+)\s*[:：]\s*(?<rest>.+)$", RegexOptions.Compiled);
+
+            foreach (var ln in lines)
+            {
+                var m = re.Match(ln);
+                if (!m.Success) continue;
+
+                var id = m.Groups["id"].Value.Trim();
+                var rest = m.Groups["rest"].Value.Trim();
+                var parts = rest.Split(new[] { '/' }, StringSplitOptions.None).Select(p => (p ?? "").Trim()).ToList();
+
+                var row = new List<string> { id };
+                row.AddRange(parts);
+                rows.Add(row.ToArray());
+            }
+
+            return rows.Count > 0;
+        }
+
+        private void WriteRowsToSheet(Excel.Range startCell, List<string[]> rows)
+        {
+            int rowCount = rows.Count;
+            int colCount = rows.Max(r => r?.Length ?? 0);
+            if (rowCount <= 0 || colCount <= 0) return;
+
+            var data = new object[rowCount, colCount];
+            for (int r = 0; r < rowCount; r++)
+            {
+                for (int c = 0; c < colCount; c++)
+                {
+                    data[r, c] = (rows[r] != null && c < rows[r].Length) ? (rows[r][c] ?? "") : "";
+                }
+            }
+
+            var ws = startCell.Worksheet as Excel.Worksheet;
+            int startRow = startCell.Row;
+            int startCol = startCell.Column;
+
+            // 開始セルに既存ヘッダーがあり、書き込み先データ先頭がID行らしければ1行下に書く
+            try
+            {
+                var current = Convert.ToString(startCell.Value2) ?? "";
+                var first = (rows.Count > 0 && rows[0] != null && rows[0].Length > 0) ? (rows[0][0] ?? "") : "";
+                if (!string.IsNullOrWhiteSpace(current) && IsIdLike(first))
+                {
+                    startRow += 1;
+                }
+            }
+            catch { }
+
+            var topLeft = ws.Cells[startRow, startCol] as Excel.Range;
+            var bottomRight = ws.Cells[startRow + rowCount - 1, startCol + colCount - 1] as Excel.Range;
+            var dst = ws.Range[topLeft, bottomRight];
+            dst.Value2 = data;
+        }
+
+        private bool IsIdLike(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            return Regex.IsMatch(s.Trim(), @"^[A-Za-z]+[-_]?\d+$");
         }
     }
 }

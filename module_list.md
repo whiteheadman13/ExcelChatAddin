@@ -3,6 +3,41 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (反映ボタンの配置変更と反映データ抽出の改善)
+- 事象:
+  1. 反映ボタンをチャット履歴ヘッダ（クリア履歴/再解析の横）に置きたい
+  2. Gemini回答が曖昧な場合に反映できない
+- 修正内容:
+  1. 反映ボタンを入力欄側からヘッダ右上（クリア履歴/再解析の横）へ移動
+  2. 反映データ抽出を強化（Markdown/TSVに加えて `A-001: 田中 / ...` のアクション行を解析）
+  3. 回答が曖昧な場合は直近入力本文からもアクション行を救済抽出
+  4. 開始セルがヘッダー値で先頭データがID形式の場合は1行下へ書き込み（ヘッダー上書き回避）
+- 対象モジュール:
+  - `ExcelChatAddin/ChatView.xaml`
+  - `ExcelChatAddin/ChatView.xaml.cs`
+
+## Session Update (Gemini回答をシートへ反映する機能を追加)
+- 事象: チャット回答が表示されるだけで、シートへ自動反映されない。
+- 修正内容:
+  1. `ChatView.xaml` に「反映」ボタンを追加
+  2. 直近送信入力と直近Gemini回答を保持
+  3. 反映時に `@range(シート,開始セル)` を優先、なければ選択セル/アクティブセルへ書き込み
+  4. Markdown表/TSV(および簡易1列)を抽出して `Range.Value2` へ反映
+- 対象モジュール:
+  - `ExcelChatAddin/ChatView.xaml`
+  - `ExcelChatAddin/ChatView.xaml.cs`
+
+## Session Update (チャット欄に現在シート一覧の分かりやすいUIを追加)
+- 事象: チャット欄で現在ブックのシート一覧を見やすく表示し、手動更新できるUIがほしい。
+- 修正内容:
+  1. `ChatView.xaml` に「シート一覧」パネル（一覧を更新ボタン + ListBox）を追加
+  2. 画面ロード時にシート一覧を初期表示
+  3. 「一覧を更新」クリックで現在ブックのシート一覧を再取得
+  4. シート名をダブルクリックすると `@range(シート名,A1)` を入力欄に追加
+- 対象モジュール:
+  - `ExcelChatAddin/ChatView.xaml`
+  - `ExcelChatAddin/ChatView.xaml.cs`
+
 ## Session Update (表設定保存時に未作成テーブルを自動作成)
 - 事象: 表設定の保存時、対象シートに表が未作成なら自動で作成したい。
 - 修正内容:
@@ -32,7 +67,7 @@
 - 修正内容:
   1. `ChatRibbon` に「課題設定」ボタンを追加し、設定画面を起動
   2. `ThisAddIn` に `ShowIssueSchemaSettings()` を追加
-  3. `IssueSchemaSettingsDialog` を追加（列名/列位置/キー列/値候補/記載例を編集）
+  3. `IssueSchemaSettingsDialog` を追加（列名/列位置/キー列/値候補/記載例を編集） 
   4. `IssueSchemaManager` を追加し `issue_schema.json` を作成・保存
   5. `Paths` に `IssueSchemaPath` を追加
 - 対象モジュール:
