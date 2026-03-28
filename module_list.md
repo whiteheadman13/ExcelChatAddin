@@ -3,6 +3,31 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (複数テーブル定義対応+@table記法+更新対象ComboBox)
+- 事象:
+  1. table_schema.json が1テーブル分しか保持できない
+  2. テーブル参照が @range 形式で分かりにくい
+  3. 更新対象テーブルを明示的に指定する手段がない
+  4. 更新対象テーブル未選択時もJSON強制されてしまう
+- 修正内容:
+  1. `TableSchemaStore` クラス追加。`table_schema.json` を配列形式（`{ "Tables": [...] }`）に変更
+  2. 旧単体JSON / `issue_schema.json` からの自動移行ロジック
+  3. `IssueSchemaManager` に `LoadStore` / `SaveStore` / `FindByTableName` / `Upsert` を追加（旧 `LoadOrCreate` / `Save` は互換ラッパー化）
+  4. `IssueSchemaSettingsDialog` をテーブル切替対応に改修（ComboBox選択で定義切替 + 定義削除ボタン追加）
+  5. `@table("テーブル名")` Regex (`TableTagRegex`) を追加
+  6. テーブル一覧ダブルクリック時の挿入形式を `@range(Sheet,Addr)` → `@table("テーブル名")` に変更
+  7. `ResolveTableToRangeKey` ヘルパーで `@table` → `Sheet!Addr` 参照キーへ解決
+  8. `BuildMaskedPayload` で `@table` タグを `@range_ref` に変換して参照データに含める
+  9. ChatView に「更新対象」ComboBox (`cmbUpdateTarget`) を追加
+  10. `RefreshSheetList` で更新対象ComboBoxを連動更新（複数テーブル定義のHasSchema判定も配列対応）
+  11. `BuildSchemaSection` を全面改修: 全参照テーブルの定義を同梱 + `_selectedUpdateTable` 選択時のみJSON強制指示を付加
+  12. `RenderPreview` で `@table` タグもクリック可能なリンクとして表示
+- 対象モジュール:
+  - `ExcelChatAddin/IssueSchemaConfig.cs`
+  - `ExcelChatAddin/IssueSchemaSettingsDialog.cs`
+  - `ExcelChatAddin/ChatView.xaml`
+  - `ExcelChatAddin/ChatView.xaml.cs`
+
 ## Session Update (JSON operations形式でのLLM応答と反映)
 - 事象:
   1. LLMがCSV/テキスト形式で返すため反映時に全データが1列に入ってしまう
