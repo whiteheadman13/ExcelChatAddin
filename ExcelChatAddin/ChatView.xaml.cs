@@ -1028,8 +1028,9 @@ namespace ExcelChatAddin
         }
 
         /// <summary>
-        /// 参照範囲に含まれるテーブル名に一致する定義があれば、LLM向けの項目定義セクションを構築する。
-        /// 一致しなければ空文字を返す。
+        /// 参照範囲に含まれるテーブルの定義をLLM向けに構築する。
+        /// - 全参照テーブルの定義を同梱（参考情報として）
+        /// - _selectedUpdateTable が設定されている場合のみ JSON強制指示を付加
         /// </summary>
         private string BuildSchemaSection(List<string> referencedKeys)
         {
@@ -1038,19 +1039,13 @@ namespace ExcelChatAddin
             var app = Globals.ThisAddIn?.Application;
             if (app?.ActiveWorkbook == null) return "";
 
-            IssueSchemaConfig schema = null;
-            try { schema = IssueSchemaManager.LoadOrCreate(app); } catch { }
-            if (schema == null || string.IsNullOrWhiteSpace(schema.TableName)) return "";
-            if (schema.Columns == null || schema.Columns.Count == 0) return "";
-
-            // 参照範囲内にスキーマのテーブルが含まれるか判定
-            bool matched = false;
+            // 参照範囲内に含まれるテーブル名を収集
+            var referencedTableNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             try
             {
                 var wb = app.ActiveWorkbook;
                 foreach (var key in referencedKeys)
                 {
-                    // key = "Sheet1!A1:E20"
                     var parts = key.Split('!');
                     if (parts.Length < 1) continue;
                     var sheetName = parts[0];
@@ -1061,53 +1056,87 @@ namespace ExcelChatAddin
 
                     foreach (Excel.ListObject lo in ws.ListObjects)
                     {
-                        if (string.Equals(lo.Name, schema.TableName, StringComparison.OrdinalIgnoreCase))
-                        {
-                            matched = true;
-                            break;
-                        }
+                        if (!string.IsNullOrWhiteSpace(lo.Name))
+                            referencedTableNames.Add(lo.Name);
                     }
-                    if (matched) break;
                 }
             }
             catch { }
 
-            if (!matched) return "";
+            if (referencedTableNames.Count == 0) return "";
 
-            // 一致したのでスキーマ定義をテキスト化
-            var sb2 = new StringBuilder();
-            sb2.AppendLine("【テーブル項目定義】");
-            sb2.AppendLine($"テーブル名: {schema.TableName}");
-            sb2.AppendLine($"ヘッダー行: {schema.HeaderRow}  データ開始行: {schema.DataStartRow}");
-            sb2.AppendLine($"キー列: {schema.KeyColumnLetter}");
-            sb2.AppendLine($"値ポリシー: {schema.ValuePolicy}");
-            sb2.AppendLine();
-            sb2.AppendLine("| 列位置 | 列名 | キー | 必須 | 型 | 値候補 | 記載例 |");
-            sb2.AppendLine("| --- | --- | --- | --- | --- | --- | --- |");
-            foreach (var c in schema.Columns)
+            // 定義ストアを読み込み
+            TableSchemaStore store = null;
+            try { store = IssueSchemaManager.LoadStore(); } catch { }
+            if (store == null || store.Tables.Count == 0) return "";
+
+            // 参照テーブルのうち定義が存在するものを抽出
+            var matchedSchemas = new List<IssueSchemaConfig>();
+            foreach (var tblName in referencedTableNames)
             {
-                var allowed = (c.AllowedValues != null && c.AllowedValues.Count > 0)
-                    ? string.Join(", ", c.AllowedValues) : "";
-                sb2.AppendLine($"| {c.ColumnLetter} | {c.ColumnName} | {(c.IsKey ? "○" : "")} | {(c.IsRequired ? "○" : "")} | {c.ValueType} | {allowed} | {c.ExampleValue} |");
+                var schema = IssueSchemaManager.FindByTableName(store, tblName);
+                if (schema != null && schema.Columns != null && schema.Columns.Count > 0)
+                    matchedSchemas.Add(schema);
             }
-            sb2.AppendLine();
-            sb2.AppendLine("★ 回答は必ず以下のJSON形式で返してください。余計な説明は不要です。");
-            sb2.AppendLine("```json");
-            sb2.AppendLine("{");
-            sb2.AppendLine("  \"operations\": [");
-            sb2.AppendLine("    {");
-            sb2.AppendLine("      \"type\": \"upsert\",");
-            sb2.AppendLine("      \"key\": \"キー列の値\",");
-            sb2.AppendLine("      \"fields\": { \"列名1\": \"値1\", \"列名2\": \"値2\" }");
-            sb2.AppendLine("    }");
-            sb2.AppendLine("  ],");
-            sb2.AppendLine("  \"errors\": []");
-            sb2.AppendLine("}");
-            sb2.AppendLine("```");
-            sb2.AppendLine("- type は upsert/insert/update のいずれか。");
-            sb2.AppendLine("- fields には上記項目定義の列名のみ使用。定義外の列は禁止。");
-            sb2.AppendLine("- enum型の列は値候補のみ使用。違反がある場合は errors に理由を記載。");
-            sb2.AppendLine();
+
+            if (matchedSchemas.Count == 0) return "";
+
+            var sb2 = new StringBuilder();
+
+            // 全参照テーブルの定義を同梱
+            foreach (var schema in matchedSchemas)
+            {
+                bool isUpdateTarget = !string.IsNullOrWhiteSpace(_selectedUpdateTable)
+                    && string.Equals(schema.TableName, _selectedUpdateTable, StringComparison.OrdinalIgnoreCase);
+
+                sb2.AppendLine($"【テーブル項目定義: {schema.TableName}】" + (isUpdateTarget ? "（★更新対象）" : "（参考）"));
+                sb2.AppendLine($"ヘッダー行: {schema.HeaderRow}  データ開始行: {schema.DataStartRow}");
+                sb2.AppendLine($"キー列: {schema.KeyColumnLetter}");
+                sb2.AppendLine($"値ポリシー: {schema.ValuePolicy}");
+                sb2.AppendLine();
+                sb2.AppendLine("| 列位置 | 列名 | キー | 必須 | 型 | 値候補 | 記載例 |");
+                sb2.AppendLine("| --- | --- | --- | --- | --- | --- | --- |");
+                foreach (var c in schema.Columns)
+                {
+                    var allowed = (c.AllowedValues != null && c.AllowedValues.Count > 0)
+                        ? string.Join(", ", c.AllowedValues) : "";
+                    sb2.AppendLine($"| {c.ColumnLetter} | {c.ColumnName} | {(c.IsKey ? "○" : "")} | {(c.IsRequired ? "○" : "")} | {c.ValueType} | {allowed} | {c.ExampleValue} |");
+                }
+                sb2.AppendLine();
+            }
+
+            // 更新対象テーブルが選択されている場合のみ JSON強制指示を付加
+            if (!string.IsNullOrWhiteSpace(_selectedUpdateTable))
+            {
+                var updateSchema = matchedSchemas.FirstOrDefault(s =>
+                    string.Equals(s.TableName, _selectedUpdateTable, StringComparison.OrdinalIgnoreCase));
+
+                sb2.AppendLine($"【更新対象テーブル: {_selectedUpdateTable}】");
+                sb2.AppendLine("★ 更新対象テーブルに対する変更を必ず以下のJSON形式で返してください。余計な説明は不要です。");
+                sb2.AppendLine("```json");
+                sb2.AppendLine("{");
+                sb2.AppendLine("  \"operations\": [");
+                sb2.AppendLine("    {");
+                sb2.AppendLine("      \"type\": \"upsert\",");
+                sb2.AppendLine("      \"key\": \"キー列の値\",");
+                sb2.AppendLine("      \"fields\": { \"列名1\": \"値1\", \"列名2\": \"値2\" }");
+                sb2.AppendLine("    }");
+                sb2.AppendLine("  ],");
+                sb2.AppendLine("  \"errors\": []");
+                sb2.AppendLine("}");
+                sb2.AppendLine("```");
+                sb2.AppendLine("- type は upsert/insert/update のいずれか。");
+                if (updateSchema != null)
+                {
+                    sb2.AppendLine($"- fields には「{_selectedUpdateTable}」の項目定義の列名のみ使用。定義外の列は禁止。");
+                }
+                else
+                {
+                    sb2.AppendLine("- fields には上記項目定義の列名のみ使用。定義外の列は禁止。");
+                }
+                sb2.AppendLine("- enum型の列は値候補のみ使用。違反がある場合は errors に理由を記載。");
+                sb2.AppendLine();
+            }
 
             return sb2.ToString();
         }
