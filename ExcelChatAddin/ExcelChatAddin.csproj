@@ -196,13 +196,17 @@
   <ItemGroup>
     <Compile Include="ChatModels.cs" />
     <Compile Include="ChatRibbon.cs" />
-    <Compile Include="ColumnDetailDialog.cs" />
+    <Compile Include="ColumnDetailDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="DebugLogger.cs" />
     <Compile Include="DictionaryManager.cs">
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="DictionaryManagerLogic.cs" />
-    <Compile Include="DiffPreviewDialog.cs" />
+    <Compile Include="DiffPreviewDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="GeminiClient.cs" />
     <Compile Include="GeminiDtos.cs" />
     <Compile Include="GeminiResponseWindow.xaml.cs">

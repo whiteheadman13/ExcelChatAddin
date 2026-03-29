@@ -1203,6 +1203,13 @@ namespace ExcelChatAddin
                 var updateSchema = matchedSchemas.FirstOrDefault(s =>
                     string.Equals(s.TableName, _selectedUpdateTable, StringComparison.OrdinalIgnoreCase));
 
+                var requiredColumns = (updateSchema?.Columns ?? new List<IssueSchemaColumn>())
+                    .Where(c => c.IsRequired)
+                    .Select(c => (c.ColumnName ?? "").Trim())
+                    .Where(n => !string.IsNullOrWhiteSpace(n))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
                 sb2.AppendLine($"【更新対象テーブル: {_selectedUpdateTable}】");
                 sb2.AppendLine("★ 更新対象テーブルに対する変更を必ず以下のJSON形式で返してください。余計な説明は不要です。");
                 sb2.AppendLine("```json");
@@ -1228,6 +1235,14 @@ namespace ExcelChatAddin
                 }
                 sb2.AppendLine("- enum型の列は値候補のみ使用。違反がある場合は errors に理由を記載。");
                 sb2.AppendLine("- 更新モードが overwrite の列は値を上書き。prepend の列は既存値の前に追記（改行区切り）。append の列は既存値の後に追記（改行区切り）。");
+                sb2.AppendLine("- 新規起票（type=insert、または type=upsert で既存キーが無い場合）は、必須=○ の列を fields に必ず全て含めること。");
+                if (requiredColumns.Count > 0)
+                {
+                    sb2.AppendLine($"- 新規起票時の必須列: {string.Join(", ", requiredColumns)}");
+                }
+                sb2.AppendLine("- 新規起票時、必須列は空文字・null・省略を禁止。");
+                sb2.AppendLine("- 議事録から値を特定できない必須列は \"(要確認)\" を設定すること。");
+                sb2.AppendLine("- 出力前に必須列の欠落を自己検証し、欠落があれば補完してから返すこと。");
                 sb2.AppendLine();
             }
 
