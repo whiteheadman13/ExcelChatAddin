@@ -34,6 +34,9 @@ namespace ExcelChatAddin
         // 更新対象テーブル名（未選択の場合は null/空）
         private string _selectedUpdateTable = null;
 
+        // ハイライトしたセルの元背景色を記録（解除用）
+        private readonly List<HighlightRecord> _highlightRecords = new List<HighlightRecord>();
+
         // ★まだUIが生成されていないタイミングで AppendText された分を溜める
         private readonly List<string> _pendingAppends = new List<string>();
 
@@ -1926,8 +1929,14 @@ namespace ExcelChatAddin
                             return;
 
                         int applied = ApplyDiffEntries(app, schema, dlg.SelectedEntries);
-                        var appliedRows = dlg.SelectedEntries.Select(x => x.KeyValue).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-                        MessageBox.Show($"反映しました。{appliedRows} 行を更新/挿入しました。", "反映");
+                        var updatedRows = dlg.SelectedEntries.Where(x => !x.IsNewRow).Select(x => x.KeyValue).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                        var insertedRows = dlg.SelectedEntries.Where(x => x.IsNewRow).Select(x => x.KeyValue).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                        var msg = "反映しました。";
+                        if (updatedRows > 0) msg += $"更新 {updatedRows}行(黄)";
+                        if (updatedRows > 0 && insertedRows > 0) msg += "、";
+                        if (insertedRows > 0) msg += $"追加 {insertedRows}行(緑)";
+                        msg += "。変更セルをハイライトしました。";
+                        MessageBox.Show(msg, "反映");
                     }
                     return;
                 }
@@ -2240,19 +2249,83 @@ namespace ExcelChatAddin
             Excel.Worksheet ws;
             if (!TryFindTableByName(wb, schema.TableName, out ws, out targetTable)) return 0;
 
+            // ハイライト色 (Excel OLE_COLOR: BGR 形式)
+            // 薄黄 #FFF9C4 → RGB(255,249,196) → OLE: 196*65536 + 249*256 + 255 = 12876287
+            // 薄緑 #C8E6C9 → RGB(200,230,201) → OLE: 201*65536 + 230*256 + 200 = 13166280
+            const int ColorUpdateYellow = 12876287;  // #FFF9C4
+            const int ColorInsertGreen = 13166280;    // #C8E6C9
+
             int applied = 0;
 
             foreach (var e in entries)
             {
                 try
                 {
-                    (ws.Cells[e.TargetRow, e.TargetCol] as Excel.Range).Value2 = e.NewValue;
+                    var cell = ws.Cells[e.TargetRow, e.TargetCol] as Excel.Range;
+
+                    // 元の背景色を記録
+                    _highlightRecords.Add(new HighlightRecord
+                    {
+                        SheetName = ws.Name,
+                        Row = e.TargetRow,
+                        Col = e.TargetCol,
+                        OriginalColorIndex = cell.Interior.ColorIndex is double ci ? ci : -4142,
+                        OriginalColor = cell.Interior.Color is int c ? c : 0
+                    });
+
+                    // 値を書き込み
+                    cell.Value2 = e.NewValue;
+
+                    // ハイライト適用
+                    cell.Interior.Color = e.IsNewRow ? ColorInsertGreen : ColorUpdateYellow;
+
                     applied++;
                 }
                 catch { }
             }
 
             return applied;
+        }
+
+        /// <summary>
+        /// ハイライトされたセルの背景色を元に戻す。
+        /// </summary>
+        public void ClearHighlights()
+        {
+            if (_highlightRecords.Count == 0) return;
+
+            try
+            {
+                var app = Globals.ThisAddIn?.Application;
+                if (app == null) return;
+                var wb = app.ActiveWorkbook;
+                if (wb == null) return;
+
+                foreach (var rec in _highlightRecords)
+                {
+                    try
+                    {
+                        Excel.Worksheet ws = null;
+                        try { ws = wb.Worksheets[rec.SheetName] as Excel.Worksheet; } catch { continue; }
+                        if (ws == null) continue;
+
+                        var cell = ws.Cells[rec.Row, rec.Col] as Excel.Range;
+                        if (rec.OriginalColorIndex < 0 || rec.OriginalColorIndex == -4142)
+                            cell.Interior.ColorIndex = Excel.XlColorIndex.xlColorIndexNone;
+                        else
+                            cell.Interior.Color = rec.OriginalColor;
+                    }
+                    catch { }
+                }
+
+                var count = _highlightRecords.Count;
+                _highlightRecords.Clear();
+                System.Windows.MessageBox.Show($"{count} セルのハイライトを解除しました。", "ハイライト解除");
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(ex.Message, "ハイライト解除エラー");
+            }
         }
 
         private static bool TryFindTableByName(Excel.Workbook wb, string tableName, out Excel.Worksheet ws, out Excel.ListObject lo)

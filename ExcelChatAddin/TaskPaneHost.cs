@@ -45,6 +45,12 @@ namespace ExcelChatAddin
             _elementHost.Child = _chatView;
             this.Controls.Add(_elementHost);
         }
+
+        public void ClearHighlights()
+        {
+            _chatView?.ClearHighlights();
+        }
+
         public string GetRangeText(string sheetName, string addressA1)
         {
             try

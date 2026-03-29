@@ -699,6 +699,28 @@ namespace ExcelChatAddin
             }
         }
 
+        public void ClearHighlights()
+        {
+            try
+            {
+                var win = this.Application.ActiveWindow;
+                if (win == null) return;
+                int hwnd = win.Hwnd;
+                if (_hostsByHwnd.TryGetValue(hwnd, out var host) && host != null)
+                {
+                    host.ClearHighlights();
+                }
+                else
+                {
+                    MessageBox.Show("チャットパネルが開かれていません。", "ハイライト解除");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "ハイライト解除エラー");
+            }
+        }
+
         private void AppendRangeTokenToInput(string token)
         {
             var win = this.Application.ActiveWindow;

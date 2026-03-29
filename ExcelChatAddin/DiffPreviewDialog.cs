@@ -151,4 +151,14 @@ namespace ExcelChatAddin
         public string OpType { get; set; } = "upsert";
         public string UpdateMode { get; set; } = "overwrite";
     }
+
+    /// <summary>ハイライトしたセルの元背景色を記録（解除用）。</summary>
+    public class HighlightRecord
+    {
+        public string SheetName { get; set; } = "";
+        public int Row { get; set; }
+        public int Col { get; set; }
+        public double OriginalColorIndex { get; set; }
+        public int OriginalColor { get; set; }
+    }
 }
