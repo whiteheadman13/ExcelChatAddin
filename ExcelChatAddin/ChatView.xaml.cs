@@ -234,7 +234,7 @@ namespace ExcelChatAddin
         }
 
         private static readonly Regex JsonBlockRegex = new Regex(
-            @"```(?:json)?\s*\r?\n(?<body>[\s\S]*?)```",
+            @"```(?:json)?\s*\r?\n?(?<body>[\s\S]*?)\r?\n?```",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private StackPanel BuildMessageBody(string displayText)
@@ -278,8 +278,8 @@ namespace ExcelChatAddin
                 var capturedLineCount = lineCount;
                 var jsonExpander = new Expander
                 {
-                    Header = string.Format("▼ JSON ({0}行) — クリックで折りたたむ", capturedLineCount),
-                    IsExpanded = true,
+                    Header = string.Format("▶ JSON ({0}行) — クリックで展開", capturedLineCount),
+                    IsExpanded = false,
                     Margin = new Thickness(0, 4, 0, 4),
                     Content = jsonTextBox
                 };
@@ -494,7 +494,10 @@ namespace ExcelChatAddin
 
                 Dispatcher.Invoke(() =>
                 {
-                    AppendChat("You", shown);
+                    // 更新対象テーブルが選択されていれば表示に含める
+                    var tableInfo = !string.IsNullOrWhiteSpace(_selectedUpdateTable)
+                        ? $"  [対象テーブル: {_selectedUpdateTable}]" : "";
+                    AppendChat("You", shown + tableInfo);
 
                     // 送信したので入力欄をクリアしてプレビュー更新
                     try
@@ -506,6 +509,9 @@ namespace ExcelChatAddin
                     catch { }
 
                     btnSendGemini.IsEnabled = false;
+
+                    // LLM回答待ちインジケータを表示
+                    AppendChat("System", "⏳ LLMからの回答を待っています...");
                 });
 
 
@@ -534,6 +540,9 @@ namespace ExcelChatAddin
 
                 Dispatcher.Invoke(() =>
                 {
+                    // 回答待ちインジケータを削除
+                    RemoveLastSystemIndicator();
+
                     AppendChat("Gemini", unmaskedResponse, raw);
                     btnSendGemini.IsEnabled = true;
                 });
@@ -542,10 +551,29 @@ namespace ExcelChatAddin
             {
                 Dispatcher.Invoke(() =>
                 {
+                    RemoveLastSystemIndicator();
                     btnSendGemini.IsEnabled = true;
                     MessageBox.Show(ex.Message, "Gemini送信エラー");
                 });
             }
+        }
+
+        private void RemoveLastSystemIndicator()
+        {
+            try
+            {
+                if (ChatHistoryPanel == null || ChatHistoryPanel.Children.Count == 0) return;
+                var last = ChatHistoryPanel.Children[ChatHistoryPanel.Children.Count - 1] as Border;
+                if (last == null) return;
+                var grid = last.Child as Grid;
+                if (grid == null || grid.Children.Count < 1) return;
+                var header = grid.Children[0] as DockPanel;
+                if (header == null || header.Children.Count < 1) return;
+                var roleBlock = header.Children[0] as TextBlock;
+                if (roleBlock != null && roleBlock.Text == "[System]")
+                    ChatHistoryPanel.Children.RemoveAt(ChatHistoryPanel.Children.Count - 1);
+            }
+            catch { }
         }
 
 
@@ -1898,7 +1926,8 @@ namespace ExcelChatAddin
                             return;
 
                         int applied = ApplyDiffEntries(app, schema, dlg.SelectedEntries);
-                        MessageBox.Show($"反映しました。{applied} 件を更新/挿入しました。", "反映");
+                        var appliedRows = dlg.SelectedEntries.Select(x => x.KeyValue).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                        MessageBox.Show($"反映しました。{appliedRows} 行を更新/挿入しました。", "反映");
                     }
                     return;
                 }
