@@ -92,6 +92,7 @@ namespace ExcelChatAddin
             });
             _grid.Columns.Add("AllowedValues", "値候補(カンマ区切り)");
             _grid.Columns.Add("ExampleValue", "記載例");
+            _grid.Columns.Add("Meaning", "項目の意味定義");
 
             _grid.CurrentCellDirtyStateChanged += (s, e) =>
             {
@@ -179,9 +180,10 @@ namespace ExcelChatAddin
                             _grid.Rows.Add(
                                 ec.ColumnLetter,
                                 ec.ColumnName,
-                                firstCol,   // 最初の列をキー列とする
-                                firstCol,   // キー列は必須
+                                firstCol,
+                                firstCol,
                                 "text",
+                                "",
                                 "",
                                 "");
                             firstCol = false;
@@ -223,7 +225,8 @@ namespace ExcelChatAddin
                         c.IsRequired,
                         string.IsNullOrWhiteSpace(c.ValueType) ? "text" : c.ValueType,
                         string.Join(",", c.AllowedValues ?? new List<string>()),
-                        c.ExampleValue ?? "");
+                        c.ExampleValue ?? "",
+                        c.Meaning ?? "");
                 }
             }
             finally
@@ -327,7 +330,8 @@ namespace ExcelChatAddin
                         IsRequired = false,
                         ValueType = "text",
                         AllowedValues = new List<string>(),
-                        ExampleValue = ""
+                        ExampleValue = "",
+                        Meaning = ""
                     });
                 }
             }
@@ -412,6 +416,7 @@ namespace ExcelChatAddin
                     string valueType = (row.Cells["ValueType"].Value?.ToString() ?? "text").Trim().ToLowerInvariant();
                     string allowedCsv = (row.Cells["AllowedValues"].Value?.ToString() ?? "").Trim();
                     string example = (row.Cells["ExampleValue"].Value?.ToString() ?? "").Trim();
+                    string meaning = (row.Cells["Meaning"].Value?.ToString() ?? "").Trim();
 
                     if (string.IsNullOrWhiteSpace(letter) && string.IsNullOrWhiteSpace(name))
                     {
@@ -445,7 +450,8 @@ namespace ExcelChatAddin
                         IsRequired = isRequired || isKey,
                         ValueType = valueType,
                         AllowedValues = allowed,
-                        ExampleValue = example
+                        ExampleValue = example,
+                        Meaning = meaning
                     });
                 }
 

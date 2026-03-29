@@ -1113,8 +1113,8 @@ namespace ExcelChatAddin
                 sb2.AppendLine($"キー列: {(string.IsNullOrWhiteSpace(keyColName) ? schema.KeyColumnLetter : keyColName)}");
                 sb2.AppendLine($"値ポリシー: {schema.ValuePolicy}");
                 sb2.AppendLine();
-                sb2.AppendLine("| 列位置 | 列名 | キー | 必須 | 型 | 値候補 | 記載例 |");
-                sb2.AppendLine("| --- | --- | --- | --- | --- | --- | --- |");
+                sb2.AppendLine("| 列位置 | 列名 | キー | 必須 | 型 | 値候補 | 記載例 | 項目の意味定義 |");
+                sb2.AppendLine("| --- | --- | --- | --- | --- | --- | --- | --- |");
                 foreach (var c in schema.Columns)
                 {
                     var allowed = (c.AllowedValues != null && c.AllowedValues.Count > 0)
@@ -1124,7 +1124,7 @@ namespace ExcelChatAddin
                     {
                         dispLetter = liveLetter;
                     }
-                    sb2.AppendLine($"| {dispLetter} | {c.ColumnName} | {(c.IsKey ? "○" : "")} | {(c.IsRequired ? "○" : "")} | {c.ValueType} | {allowed} | {c.ExampleValue} |");
+                    sb2.AppendLine($"| {dispLetter} | {c.ColumnName} | {(c.IsKey ? "○" : "")} | {(c.IsRequired ? "○" : "")} | {c.ValueType} | {allowed} | {c.ExampleValue} | {c.Meaning} |");
                 }
                 sb2.AppendLine();
             }

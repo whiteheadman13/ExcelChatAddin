@@ -16,6 +16,7 @@ namespace ExcelChatAddin
         public string ValueType { get; set; } = "text";
         public List<string> AllowedValues { get; set; } = new List<string>();
         public string ExampleValue { get; set; } = "";
+        public string Meaning { get; set; } = "";
     }
 
     public class IssueSchemaConfig
@@ -166,6 +167,7 @@ namespace ExcelChatAddin
                 c.ColumnName = (c.ColumnName ?? "").Trim();
                 c.ValueType = string.IsNullOrWhiteSpace(c.ValueType) ? "text" : c.ValueType.Trim().ToLowerInvariant();
                 c.ExampleValue = (c.ExampleValue ?? "").Trim();
+                c.Meaning = (c.Meaning ?? "").Trim();
                 c.AllowedValues = (c.AllowedValues ?? new List<string>())
                     .Select(x => (x ?? "").Trim())
                     .Where(x => !string.IsNullOrWhiteSpace(x))
