@@ -34,7 +34,7 @@ namespace ExcelChatAddin
         private void InitializeLayout()
         {
             Text = "列定義の詳細編集";
-            Size = new Size(520, 480);
+            Size = new Size(520, 580);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -100,10 +100,6 @@ namespace ExcelChatAddin
             _txtAllowedValues = AddTextBox(inputX, y, inputW);
             y += rowH;
 
-            AddLabel("記載例:", labelX, y);
-            _txtExampleValue = AddTextBox(inputX, y, inputW);
-            y += rowH;
-
             AddLabel("項目の意味定義:", labelX, y);
             _txtMeaning = new TextBox
             {
@@ -114,6 +110,19 @@ namespace ExcelChatAddin
                 ScrollBars = ScrollBars.Vertical
             };
             Controls.Add(_txtMeaning);
+            y += 68;
+
+            AddLabel("記載例:", labelX, y);
+            _txtExampleValue = new TextBox
+            {
+                Location = new Point(inputX, y),
+                Width = inputW,
+                Height = 60,
+                Multiline = true,
+                ScrollBars = ScrollBars.Vertical,
+                AcceptsReturn = true
+            };
+            Controls.Add(_txtExampleValue);
             y += 68;
 
             var btnOk = new Button
