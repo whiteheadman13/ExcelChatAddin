@@ -23,11 +23,8 @@ namespace ExcelChatAddin
             _excelApp = app;
             _store = IssueSchemaManager.LoadStore();
             InitializeLayout();
-            // 初回: 最初の定義があればそれを表示
-            if (_store.Tables.Count > 0)
-                LoadSchemaForTable(_store.Tables[0].TableName);
-            else
-                LoadSchemaForTable(null);
+            // 初回: Excelテーブル名と一致する定義があればそれを表示
+            SelectInitialTable();
         }
 
         private void InitializeLayout()
@@ -43,7 +40,7 @@ namespace ExcelChatAddin
             {
                 Location = new Point(105, 10),
                 Width = 220,
-                DropDownStyle = ComboBoxStyle.DropDown
+                DropDownStyle = ComboBoxStyle.DropDownList
             };
             top.Controls.Add(_cmbTableName);
             PopulateTableNames();
@@ -241,7 +238,7 @@ namespace ExcelChatAddin
                 var tableName = ExtractTableName(_cmbTableName.Text);
                 if (string.IsNullOrWhiteSpace(tableName))
                 {
-                    MessageBox.Show("対象テーブル名を入力または選択してください。");
+                    MessageBox.Show("対象テーブル名をExcelテーブル一覧から選択してください。");
                     return;
                 }
 
@@ -333,8 +330,23 @@ namespace ExcelChatAddin
                 };
 
                 IssueSchemaManager.Upsert(_store, cfg);
+                CleanupOrphanedDefinitions();
                 IssueSchemaManager.SaveStore(_store);
                 EnsureTableIfMissing(cfg);
+
+                // ComboBoxの★定義あり表示を更新
+                PopulateTableNames();
+                for (int i = 0; i < _cmbTableName.Items.Count; i++)
+                {
+                    if (ExtractTableName(_cmbTableName.Items[i].ToString())
+                        .Equals(tableName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _suppressTableSwitch = true;
+                        _cmbTableName.SelectedIndex = i;
+                        _suppressTableSwitch = false;
+                        break;
+                    }
+                }
 
                 MessageBox.Show($"「{tableName}」の定義を保存しました。");
             }
@@ -517,7 +529,11 @@ namespace ExcelChatAddin
                                 var name = lo.Name;
                                 if (!string.IsNullOrWhiteSpace(name))
                                 {
-                                    _cmbTableName.Items.Add($"{name}  ({ws.Name})");
+                                    var hasSchema = IssueSchemaManager.FindByTableName(_store, name) != null;
+                                    var label = hasSchema
+                                        ? $"{name}  ({ws.Name}) ★定義あり"
+                                        : $"{name}  ({ws.Name})";
+                                    _cmbTableName.Items.Add(label);
                                 }
                             }
                             catch { }
@@ -525,6 +541,65 @@ namespace ExcelChatAddin
                     }
                     catch { }
                 }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// 初回表示時、Excelテーブル名と一致する既存定義を自動選択する。
+        /// 一致するものがなければ先頭を選択（新規定義用）。
+        /// </summary>
+        private void SelectInitialTable()
+        {
+            if (_cmbTableName.Items.Count == 0)
+            {
+                LoadSchemaForTable(null);
+                return;
+            }
+
+            // 既存定義のいずれかに一致するComboBox項目を探す
+            for (int i = 0; i < _cmbTableName.Items.Count; i++)
+            {
+                var excelName = ExtractTableName(_cmbTableName.Items[i].ToString());
+                if (IssueSchemaManager.FindByTableName(_store, excelName) != null)
+                {
+                    _cmbTableName.SelectedIndex = i;
+                    return;
+                }
+            }
+
+            // 一致なし → 先頭選択
+            _cmbTableName.SelectedIndex = 0;
+        }
+
+        /// <summary>
+        /// Excelブック内に存在しないテーブル名の定義を自動削除する。
+        /// </summary>
+        private void CleanupOrphanedDefinitions()
+        {
+            try
+            {
+                var wb = _excelApp?.ActiveWorkbook;
+                if (wb == null) return;
+
+                var excelTableNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (Excel.Worksheet ws in wb.Worksheets)
+                {
+                    try
+                    {
+                        if (ws.ListObjects == null) continue;
+                        foreach (Excel.ListObject lo in ws.ListObjects)
+                        {
+                            if (!string.IsNullOrWhiteSpace(lo.Name))
+                                excelTableNames.Add(lo.Name);
+                        }
+                    }
+                    catch { }
+                }
+
+                _store.Tables.RemoveAll(t =>
+                    !string.IsNullOrWhiteSpace(t.TableName)
+                    && !excelTableNames.Contains(t.TableName));
             }
             catch { }
         }
