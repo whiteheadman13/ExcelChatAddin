@@ -93,6 +93,12 @@ namespace ExcelChatAddin
             _grid.Columns.Add("AllowedValues", "値候補(カンマ区切り)");
             _grid.Columns.Add("ExampleValue", "記載例");
             _grid.Columns.Add("Meaning", "項目の意味定義");
+            _grid.Columns.Add(new DataGridViewComboBoxColumn
+            {
+                Name = "UpdateMode",
+                HeaderText = "更新モード",
+                DataSource = new[] { "overwrite", "prepend", "append" }
+            });
 
             _grid.CurrentCellDirtyStateChanged += (s, e) =>
             {
@@ -100,6 +106,7 @@ namespace ExcelChatAddin
                     _grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
             };
             _grid.CellValueChanged += Grid_CellValueChanged;
+            _grid.CellDoubleClick += Grid_CellDoubleClick;
             _grid.DataError += (s, e) => { e.ThrowException = false; };
 
             var bottom = new Panel { Dock = DockStyle.Bottom, Height = 52 };
@@ -185,7 +192,8 @@ namespace ExcelChatAddin
                                 "text",
                                 "",
                                 "",
-                                "");
+                                "",
+                                "overwrite");
                             firstCol = false;
                         }
                     }
@@ -226,7 +234,8 @@ namespace ExcelChatAddin
                         string.IsNullOrWhiteSpace(c.ValueType) ? "text" : c.ValueType,
                         string.Join(",", c.AllowedValues ?? new List<string>()),
                         c.ExampleValue ?? "",
-                        c.Meaning ?? "");
+                        c.Meaning ?? "",
+                        string.IsNullOrWhiteSpace(c.UpdateMode) ? "overwrite" : c.UpdateMode);
                 }
             }
             finally
@@ -383,6 +392,46 @@ namespace ExcelChatAddin
             row.Cells["IsRequired"].Value = true;
         }
 
+        private void Grid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+            var gridRow = _grid.Rows[e.RowIndex];
+            if (gridRow.IsNewRow) return;
+
+            // 現在のグリッド行からIssueSchemaColumnを組み立て
+            var col = new IssueSchemaColumn
+            {
+                ColumnLetter = (gridRow.Cells["ColumnLetter"].Value?.ToString() ?? "").Trim(),
+                ColumnName = (gridRow.Cells["ColumnName"].Value?.ToString() ?? "").Trim(),
+                IsKey = Convert.ToBoolean(gridRow.Cells["IsKey"].Value ?? false),
+                IsRequired = Convert.ToBoolean(gridRow.Cells["IsRequired"].Value ?? false),
+                ValueType = (gridRow.Cells["ValueType"].Value?.ToString() ?? "text").Trim(),
+                AllowedValues = (gridRow.Cells["AllowedValues"].Value?.ToString() ?? "")
+                    .Split(new[] { ',', '、' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(x => x.Trim()).Where(x => !string.IsNullOrWhiteSpace(x)).ToList(),
+                ExampleValue = (gridRow.Cells["ExampleValue"].Value?.ToString() ?? "").Trim(),
+                Meaning = (gridRow.Cells["Meaning"].Value?.ToString() ?? "").Trim(),
+                UpdateMode = (gridRow.Cells["UpdateMode"].Value?.ToString() ?? "overwrite").Trim()
+            };
+
+            using (var dlg = new ColumnDetailDialog(col))
+            {
+                dlg.ShowDialog(this);
+                if (!dlg.Confirmed) return;
+
+                var r = dlg.Result;
+                gridRow.Cells["ColumnLetter"].Value = r.ColumnLetter;
+                gridRow.Cells["ColumnName"].Value = r.ColumnName;
+                gridRow.Cells["IsKey"].Value = r.IsKey;
+                gridRow.Cells["IsRequired"].Value = r.IsRequired;
+                gridRow.Cells["ValueType"].Value = string.IsNullOrWhiteSpace(r.ValueType) ? "text" : r.ValueType;
+                gridRow.Cells["AllowedValues"].Value = string.Join(",", r.AllowedValues ?? new List<string>());
+                gridRow.Cells["ExampleValue"].Value = r.ExampleValue ?? "";
+                gridRow.Cells["Meaning"].Value = r.Meaning ?? "";
+                gridRow.Cells["UpdateMode"].Value = string.IsNullOrWhiteSpace(r.UpdateMode) ? "overwrite" : r.UpdateMode;
+            }
+        }
+
         private void BtnSave_Click(object sender, EventArgs e)
         {
             try
@@ -417,6 +466,7 @@ namespace ExcelChatAddin
                     string allowedCsv = (row.Cells["AllowedValues"].Value?.ToString() ?? "").Trim();
                     string example = (row.Cells["ExampleValue"].Value?.ToString() ?? "").Trim();
                     string meaning = (row.Cells["Meaning"].Value?.ToString() ?? "").Trim();
+                    string updateMode = (row.Cells["UpdateMode"].Value?.ToString() ?? "overwrite").Trim().ToLowerInvariant();
 
                     if (string.IsNullOrWhiteSpace(letter) && string.IsNullOrWhiteSpace(name))
                     {
@@ -451,7 +501,8 @@ namespace ExcelChatAddin
                         ValueType = valueType,
                         AllowedValues = allowed,
                         ExampleValue = example,
-                        Meaning = meaning
+                        Meaning = meaning,
+                        UpdateMode = updateMode
                     });
                 }
 

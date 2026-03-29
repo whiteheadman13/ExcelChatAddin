@@ -17,6 +17,10 @@ namespace ExcelChatAddin
         public List<string> AllowedValues { get; set; } = new List<string>();
         public string ExampleValue { get; set; } = "";
         public string Meaning { get; set; } = "";
+        /// <summary>
+        /// 更新モード: overwrite（上書き）/ prepend（前方追記）/ append（後方追記）
+        /// </summary>
+        public string UpdateMode { get; set; } = "overwrite";
     }
 
     public class IssueSchemaConfig
@@ -168,6 +172,9 @@ namespace ExcelChatAddin
                 c.ValueType = string.IsNullOrWhiteSpace(c.ValueType) ? "text" : c.ValueType.Trim().ToLowerInvariant();
                 c.ExampleValue = (c.ExampleValue ?? "").Trim();
                 c.Meaning = (c.Meaning ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(c.UpdateMode)
+                    || (c.UpdateMode != "overwrite" && c.UpdateMode != "prepend" && c.UpdateMode != "append"))
+                    c.UpdateMode = "overwrite";
                 c.AllowedValues = (c.AllowedValues ?? new List<string>())
                     .Select(x => (x ?? "").Trim())
                     .Where(x => !string.IsNullOrWhiteSpace(x))

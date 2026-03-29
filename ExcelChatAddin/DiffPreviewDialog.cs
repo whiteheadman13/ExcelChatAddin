@@ -149,5 +149,6 @@ namespace ExcelChatAddin
         public int TargetCol { get; set; } = -1;
         public int KeyColIdx { get; set; } = -1;
         public string OpType { get; set; } = "upsert";
+        public string UpdateMode { get; set; } = "overwrite";
     }
 }

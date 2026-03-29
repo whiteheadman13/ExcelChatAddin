@@ -1113,8 +1113,8 @@ namespace ExcelChatAddin
                 sb2.AppendLine($"キー列: {(string.IsNullOrWhiteSpace(keyColName) ? schema.KeyColumnLetter : keyColName)}");
                 sb2.AppendLine($"値ポリシー: {schema.ValuePolicy}");
                 sb2.AppendLine();
-                sb2.AppendLine("| 列位置 | 列名 | キー | 必須 | 型 | 値候補 | 記載例 | 項目の意味定義 |");
-                sb2.AppendLine("| --- | --- | --- | --- | --- | --- | --- | --- |");
+                sb2.AppendLine("| 列位置 | 列名 | キー | 必須 | 型 | 更新モード | 値候補 | 記載例 | 項目の意味定義 |");
+                sb2.AppendLine("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
                 foreach (var c in schema.Columns)
                 {
                     var allowed = (c.AllowedValues != null && c.AllowedValues.Count > 0)
@@ -1124,7 +1124,8 @@ namespace ExcelChatAddin
                     {
                         dispLetter = liveLetter;
                     }
-                    sb2.AppendLine($"| {dispLetter} | {c.ColumnName} | {(c.IsKey ? "○" : "")} | {(c.IsRequired ? "○" : "")} | {c.ValueType} | {allowed} | {c.ExampleValue} | {c.Meaning} |");
+                    var modeLabel = (c.UpdateMode ?? "overwrite").ToLowerInvariant();
+                    sb2.AppendLine($"| {dispLetter} | {c.ColumnName} | {(c.IsKey ? "○" : "")} | {(c.IsRequired ? "○" : "")} | {c.ValueType} | {modeLabel} | {allowed} | {c.ExampleValue} | {c.Meaning} |");
                 }
                 sb2.AppendLine();
             }
@@ -1159,6 +1160,7 @@ namespace ExcelChatAddin
                     sb2.AppendLine("- fields には上記項目定義の列名のみ使用。定義外の列は禁止。");
                 }
                 sb2.AppendLine("- enum型の列は値候補のみ使用。違反がある場合は errors に理由を記載。");
+                sb2.AppendLine("- 更新モードが overwrite の列は値を上書き。prepend の列は既存値の前に追記（改行区切り）。append の列は既存値の後に追記（改行区切り）。");
                 sb2.AppendLine();
             }
 
@@ -2060,6 +2062,11 @@ namespace ExcelChatAddin
                         if (isNew && string.Equals(propName, keyColNormalized, StringComparison.OrdinalIgnoreCase))
                             continue;
 
+                        // 該当列の更新モードを取得
+                        var colDef = schema.Columns.FirstOrDefault(c =>
+                            string.Equals(NormalizeHeaderName(c.ColumnName), propName, StringComparison.OrdinalIgnoreCase));
+                        var updateMode = (colDef?.UpdateMode ?? "overwrite").ToLowerInvariant();
+
                         var newValue = prop.Value?.ToString() ?? "";
                         var oldValue = "";
 
@@ -2074,17 +2081,28 @@ namespace ExcelChatAddin
                         if (!isNew && string.Equals(oldValue.Trim(), newValue.Trim(), StringComparison.Ordinal))
                             continue;
 
+                        // 追記モードの場合、プレビュー表示用の値を組み立て
+                        var displayNewValue = newValue;
+                        if (!isNew && !string.IsNullOrWhiteSpace(oldValue))
+                        {
+                            if (updateMode == "prepend")
+                                displayNewValue = newValue + "\n" + oldValue;
+                            else if (updateMode == "append")
+                                displayNewValue = oldValue + "\n" + newValue;
+                        }
+
                         result.Add(new DiffEntry
                         {
                             KeyValue = keyValue,
                             FieldName = prop.Name,
                             OldValue = isNew ? "—" : oldValue,
-                            NewValue = newValue,
+                            NewValue = displayNewValue,
                             IsNewRow = isNew,
                             TargetRow = newRowNum,
                             TargetCol = colIdx,
                             KeyColIdx = keyColIdx,
-                            OpType = opType
+                            OpType = opType,
+                            UpdateMode = updateMode
                         });
                     }
 
