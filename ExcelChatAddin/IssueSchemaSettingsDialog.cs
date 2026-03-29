@@ -161,16 +161,36 @@ namespace ExcelChatAddin
                     cfg = IssueSchemaManager.FindByTableName(_store, tableName);
                 }
 
+                // Excelテーブルからヘッダー列情報を読み取る
+                var excelColumns = ReadExcelTableHeaders(tableName);
+
                 if (cfg == null)
                 {
-                    // 定義なし → 空のフォーム（新規定義用）
+                    // 定義なし → Excelヘッダーから自動生成
                     _numHeaderRow.Value = 1;
                     _numDataStartRow.Value = 2;
                     _grid.Rows.Clear();
-                    // ComboBoxのテキストはそのまま（ユーザーが選択したテーブル名を維持）
+
+                    if (excelColumns.Count > 0)
+                    {
+                        bool firstCol = true;
+                        foreach (var ec in excelColumns)
+                        {
+                            _grid.Rows.Add(
+                                ec.ColumnLetter,
+                                ec.ColumnName,
+                                firstCol,   // 最初の列をキー列とする
+                                firstCol,   // キー列は必須
+                                "text",
+                                "",
+                                "");
+                            firstCol = false;
+                        }
+                    }
                     return;
                 }
 
+                // 既存定義あり → ロード + Excelヘッダーとの差分マージ
                 // ComboBoxの候補に一致する項目があれば選択
                 var name = cfg.TableName ?? "";
                 bool found = false;
@@ -190,8 +210,11 @@ namespace ExcelChatAddin
                 _numHeaderRow.Value = Math.Max(1, cfg.HeaderRow);
                 _numDataStartRow.Value = Math.Max(1, cfg.DataStartRow);
 
+                // 差分マージ: Excelヘッダー情報がある場合
+                var mergedColumns = MergeColumnsWithExcel(cfg.Columns, excelColumns);
+
                 _grid.Rows.Clear();
-                foreach (var c in cfg.Columns)
+                foreach (var c in mergedColumns)
                 {
                     _grid.Rows.Add(
                         c.ColumnLetter,
@@ -207,6 +230,116 @@ namespace ExcelChatAddin
             {
                 _suppressTableSwitch = false;
             }
+        }
+
+        /// <summary>
+        /// Excelテーブルのヘッダー行から列情報を読み取る。
+        /// </summary>
+        private List<IssueSchemaColumn> ReadExcelTableHeaders(string tableName)
+        {
+            var result = new List<IssueSchemaColumn>();
+            if (string.IsNullOrWhiteSpace(tableName)) return result;
+
+            try
+            {
+                var wb = _excelApp?.ActiveWorkbook;
+                if (wb == null) return result;
+
+                foreach (Excel.Worksheet ws in wb.Worksheets)
+                {
+                    if (ws.ListObjects == null) continue;
+                    foreach (Excel.ListObject lo in ws.ListObjects)
+                    {
+                        if (!string.Equals(lo.Name, tableName, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        var headerRow = lo.HeaderRowRange;
+                        if (headerRow == null) return result;
+
+                        for (int col = 1; col <= headerRow.Columns.Count; col++)
+                        {
+                            var cell = headerRow.Cells[1, col] as Excel.Range;
+                            var headerText = Convert.ToString(cell?.Value2) ?? "";
+                            if (string.IsNullOrWhiteSpace(headerText)) continue;
+
+                            // 列のアドレスからレター部分を抽出
+                            var colLetter = IndexToColumnLetter(headerRow.Column + col - 1);
+
+                            result.Add(new IssueSchemaColumn
+                            {
+                                ColumnLetter = colLetter,
+                                ColumnName = headerText.Trim(),
+                                IsKey = false,
+                                IsRequired = false,
+                                ValueType = "text",
+                                AllowedValues = new List<string>(),
+                                ExampleValue = ""
+                            });
+                        }
+                        return result;
+                    }
+                }
+            }
+            catch { }
+            return result;
+        }
+
+        /// <summary>
+        /// 既存定義とExcelヘッダーをマージする。
+        /// - Excelにあって定義にない列 → 末尾に追加
+        /// - 定義にあってExcelにない列 → 除外
+        /// - 両方にある列 → 既存定義を維持（列名はExcel側に更新）
+        /// </summary>
+        private List<IssueSchemaColumn> MergeColumnsWithExcel(
+            List<IssueSchemaColumn> definedColumns,
+            List<IssueSchemaColumn> excelColumns)
+        {
+            if (excelColumns == null || excelColumns.Count == 0)
+                return definedColumns ?? new List<IssueSchemaColumn>();
+
+            var merged = new List<IssueSchemaColumn>();
+
+            // Excel列をレター→列情報のマップに
+            var excelByLetter = new Dictionary<string, IssueSchemaColumn>(StringComparer.OrdinalIgnoreCase);
+            foreach (var ec in excelColumns)
+                excelByLetter[ec.ColumnLetter] = ec;
+
+            // 既存定義のうちExcelに存在する列を維持（列名はExcel側に更新）
+            var usedLetters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var dc in definedColumns ?? new List<IssueSchemaColumn>())
+            {
+                if (excelByLetter.ContainsKey(dc.ColumnLetter))
+                {
+                    // Excelに存在 → 維持（列名をExcel側に同期）
+                    dc.ColumnName = excelByLetter[dc.ColumnLetter].ColumnName;
+                    merged.Add(dc);
+                    usedLetters.Add(dc.ColumnLetter);
+                }
+                // Excelに存在しない → 除外（削除された列）
+            }
+
+            // Excelにあって定義にない列を末尾に追加
+            foreach (var ec in excelColumns)
+            {
+                if (!usedLetters.Contains(ec.ColumnLetter))
+                {
+                    merged.Add(ec);
+                }
+            }
+
+            return merged;
+        }
+
+        private static string IndexToColumnLetter(int colIndex)
+        {
+            var result = "";
+            while (colIndex > 0)
+            {
+                colIndex--;
+                result = (char)('A' + colIndex % 26) + result;
+                colIndex /= 26;
+            }
+            return result;
         }
 
         private void Grid_CellValueChanged(object sender, DataGridViewCellEventArgs e)
