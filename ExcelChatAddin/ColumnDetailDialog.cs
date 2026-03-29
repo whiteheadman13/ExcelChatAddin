@@ -24,7 +24,7 @@ namespace ExcelChatAddin
         public IssueSchemaColumn Result { get; private set; }
         public bool Confirmed { get; private set; }
 
-        public ColumnDetailDialog(IissueSchemaColumn col)
+        public ColumnDetailDialog(IssueSchemaColumn col)
         {
             Result = col ?? new IssueSchemaColumn();
             InitializeLayout();
