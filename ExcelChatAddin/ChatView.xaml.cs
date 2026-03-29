@@ -367,7 +367,7 @@ namespace ExcelChatAddin
             // ★ここが「Loaded 時に吐き出す」
             Loaded += (s, e) =>
             {
-                // 溜めていた追記を反映
+                // 溜まていた追記を反映
                 if (_pendingAppends.Count > 0)
                 {
                     foreach (var t in _pendingAppends)
@@ -2048,18 +2048,26 @@ namespace ExcelChatAddin
                         });
                     }
 
+                    var keyColNormalized = NormalizeHeaderName(keyCol?.ColumnName ?? "");
+
                     foreach (var prop in fields.Properties())
                     {
                         var propName = NormalizeHeaderName(prop.Name);
                         if (!allowedNames.Contains(propName)) continue;
                         if (!liveNameToColumn.TryGetValue(propName, out int colIdx)) continue;
 
+                        // 新規行のキー列は既に上で追加済みのためスキップ
+                        if (isNew && string.Equals(propName, keyColNormalized, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
                         var newValue = prop.Value?.ToString() ?? "";
                         var oldValue = "";
 
                         if (!isNew)
                         {
-                            oldValue = Convert.ToString((ws.Cells[targetRow, colIdx] as Excel.Range)?.Value2) ?? "";
+                            // Textプロパティで書式適用済みの値（日付等）を取得
+                            var cell = ws.Cells[targetRow, colIdx] as Excel.Range;
+                            oldValue = cell?.Text?.ToString() ?? Convert.ToString(cell?.Value2) ?? "";
                         }
 
                         // 値が同じならスキップ
