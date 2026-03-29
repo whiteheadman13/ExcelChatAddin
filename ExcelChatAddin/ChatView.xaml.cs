@@ -233,6 +233,78 @@ namespace ExcelChatAddin
             return expander;
         }
 
+        private static readonly Regex JsonBlockRegex = new Regex(
+            @"```(?:json)?\s*\r?\n(?<body>[\s\S]*?)```",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private StackPanel BuildMessageBody(string displayText)
+        {
+            var panel = new StackPanel { Orientation = Orientation.Vertical, Margin = new Thickness(0, 6, 0, 0) };
+
+            if (string.IsNullOrEmpty(displayText))
+            {
+                panel.Children.Add(new TextBlock { Text = "", TextWrapping = TextWrapping.Wrap });
+                return panel;
+            }
+
+            int pos = 0;
+            foreach (Match m in JsonBlockRegex.Matches(displayText))
+            {
+                if (m.Index > pos)
+                {
+                    var before = displayText.Substring(pos, m.Index - pos).Trim();
+                    if (!string.IsNullOrEmpty(before))
+                        panel.Children.Add(new TextBlock { Text = before, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4) });
+                }
+
+                var jsonBody = m.Groups["body"].Value.TrimEnd();
+                var lineCount = jsonBody.Split('\n').Length;
+
+                var jsonTextBox = new TextBox
+                {
+                    Text = jsonBody,
+                    IsReadOnly = true,
+                    FontFamily = new System.Windows.Media.FontFamily("Consolas, Courier New"),
+                    FontSize = 11,
+                    Background = System.Windows.Media.Brushes.WhiteSmoke,
+                    BorderThickness = new Thickness(0),
+                    TextWrapping = TextWrapping.NoWrap,
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    MaxHeight = 300,
+                    Padding = new Thickness(6)
+                };
+
+                var capturedLineCount = lineCount;
+                var jsonExpander = new Expander
+                {
+                    Header = string.Format("▼ JSON ({0}行) — クリックで折りたたむ", capturedLineCount),
+                    IsExpanded = true,
+                    Margin = new Thickness(0, 4, 0, 4),
+                    Content = jsonTextBox
+                };
+                jsonExpander.Collapsed += (s, e2) =>
+                    ((Expander)s).Header = string.Format("▶ JSON ({0}行) — クリックで展開", capturedLineCount);
+                jsonExpander.Expanded += (s, e2) =>
+                    ((Expander)s).Header = string.Format("▼ JSON ({0}行) — クリックで折りたたむ", capturedLineCount);
+
+                panel.Children.Add(jsonExpander);
+                pos = m.Index + m.Length;
+            }
+
+            if (pos < displayText.Length)
+            {
+                var after = displayText.Substring(pos).Trim();
+                if (!string.IsNullOrEmpty(after))
+                    panel.Children.Add(new TextBlock { Text = after, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
+            }
+
+            if (panel.Children.Count == 0)
+                panel.Children.Add(new TextBlock { Text = displayText, TextWrapping = TextWrapping.Wrap });
+
+            return panel;
+        }
+
         // Replace @range_ref(#Rn) placeholders with the original @range(sheet,addr) where possible for display/copy.
         private string ReplaceRangeRefsForDisplay(string text)
         {
@@ -614,14 +686,9 @@ namespace ExcelChatAddin
             }
             else
             {
-                var bodyText = new TextBlock
-                {
-                    Text = displayText ?? "",
-                    TextWrapping = TextWrapping.Wrap,
-                    Margin = new Thickness(0, 6, 0, 0)
-                };
-                grid.Children.Add(bodyText);
-                Grid.SetRow(bodyText, 1);
+                var bodyPanel = BuildMessageBody(displayText ?? "");
+                grid.Children.Add(bodyPanel);
+                Grid.SetRow(bodyPanel, 1);
             }
 
             container.Child = grid;
@@ -1671,7 +1738,7 @@ namespace ExcelChatAddin
                     foreach (var t in store.Tables)
                     {
                         if (!string.IsNullOrWhiteSpace(t.TableName)) definedNames.Add(t.TableName);
-                    }
+                      }
                 }
 
                 if (app?.ActiveWorkbook != null)
@@ -2066,7 +2133,7 @@ namespace ExcelChatAddin
                         var colDef = schema.Columns.FirstOrDefault(c =>
                             string.Equals(NormalizeHeaderName(c.ColumnName), propName, StringComparison.OrdinalIgnoreCase));
                         var updateMode = (colDef?.UpdateMode ?? "overwrite").ToLowerInvariant();
-
+                        
                         var newValue = prop.Value?.ToString() ?? "";
                         var oldValue = "";
 
