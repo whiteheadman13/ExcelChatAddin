@@ -24,7 +24,7 @@ namespace ExcelChatAddin
         public IssueSchemaColumn Result { get; private set; }
         public bool Confirmed { get; private set; }
 
-        public ColumnDetailDialog(IssueSchemaColumn col)
+        public ColumnDetailDialog(IissueSchemaColumn col)
         {
             Result = col ?? new IssueSchemaColumn();
             InitializeLayout();
@@ -34,7 +34,7 @@ namespace ExcelChatAddin
         private void InitializeLayout()
         {
             Text = "列定義の詳細編集";
-            Size = new Size(520, 580);
+            Size = new Size(520, 640);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -101,21 +101,37 @@ namespace ExcelChatAddin
             y += rowH;
 
             AddLabel("項目の意味定義:", labelX, y);
+            Controls.Add(new Label
+            {
+                Text = "(Ctrl+Enter で改行)",
+                Location = new Point(inputX, y + 3),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font(DefaultFont.FontFamily, 8)
+            });
             _txtMeaning = new TextBox
             {
-                Location = new Point(inputX, y),
+                Location = new Point(inputX, y + 20),
                 Width = inputW,
                 Height = 60,
                 Multiline = true,
                 ScrollBars = ScrollBars.Vertical
             };
             Controls.Add(_txtMeaning);
-            y += 68;
+            y += 88;
 
             AddLabel("記載例:", labelX, y);
+            Controls.Add(new Label
+            {
+                Text = "(Ctrl+Enter で改行)",
+                Location = new Point(inputX, y + 3),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font(DefaultFont.FontFamily, 8)
+            });
             _txtExampleValue = new TextBox
             {
-                Location = new Point(inputX, y),
+                Location = new Point(inputX, y + 20),
                 Width = inputW,
                 Height = 60,
                 Multiline = true,
@@ -123,7 +139,7 @@ namespace ExcelChatAddin
                 AcceptsReturn = true
             };
             Controls.Add(_txtExampleValue);
-            y += 68;
+            y += 88;
 
             var btnOk = new Button
             {
