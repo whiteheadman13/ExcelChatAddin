@@ -285,10 +285,10 @@ namespace ExcelChatAddin
         }
 
         /// <summary>
-        /// 既存定義とExcelヘッダーをマージする。
-        /// - Excelにあって定義にない列 → 末尾に追加
+        /// 既存定義とExcelヘッダーをマージする（列名ベース）。
+        /// - Excelにあって定義にない列 → 末尾に追加（新規）
         /// - 定義にあってExcelにない列 → 除外
-        /// - 両方にある列 → 既存定義を維持（列名はExcel側に更新）
+        /// - 両方にある列 → 既存定義を維持しつつ、現在の列位置へ更新
         /// </summary>
         private List<IssueSchemaColumn> MergeColumnsWithExcel(
             List<IssueSchemaColumn> definedColumns,
@@ -298,36 +298,53 @@ namespace ExcelChatAddin
                 return definedColumns ?? new List<IssueSchemaColumn>();
 
             var merged = new List<IssueSchemaColumn>();
+            var remain = new List<IssueSchemaColumn>(definedColumns ?? new List<IssueSchemaColumn>());
 
-            // Excel列をレター→列情報のマップに
-            var excelByLetter = new Dictionary<string, IssueSchemaColumn>(StringComparer.OrdinalIgnoreCase);
+            // Excel列順に走査し、列名一致で既存定義を引き当てる
             foreach (var ec in excelColumns)
-                excelByLetter[ec.ColumnLetter] = ec;
-
-            // 既存定義のうちExcelに存在する列を維持（列名はExcel側に更新）
-            var usedLetters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var dc in definedColumns ?? new List<IssueSchemaColumn>())
             {
-                if (excelByLetter.ContainsKey(dc.ColumnLetter))
+                var ecName = NormalizeColumnName(ec.ColumnName);
+
+                var match = remain.FirstOrDefault(dc =>
+                    string.Equals(NormalizeColumnName(dc.ColumnName), ecName, StringComparison.OrdinalIgnoreCase));
+
+                if (match != null)
                 {
-                    // Excelに存在 → 維持（列名をExcel側に同期）
-                    dc.ColumnName = excelByLetter[dc.ColumnLetter].ColumnName;
-                    merged.Add(dc);
-                    usedLetters.Add(dc.ColumnLetter);
+                    // 既存定義を維持（型/必須/値候補/記載例等）し、現在の列位置へ追従
+                    match.ColumnLetter = ec.ColumnLetter;
+                    match.ColumnName = ec.ColumnName;
+                    merged.Add(match);
+                    remain.Remove(match);
                 }
-                // Excelに存在しない → 除外（削除された列）
+                else
+                {
+                    // 新規列
+                    merged.Add(new IssueSchemaColumn
+                    {
+                        ColumnLetter = ec.ColumnLetter,
+                        ColumnName = ec.ColumnName,
+                        IsKey = false,
+                        IsRequired = false,
+                        ValueType = "text",
+                        AllowedValues = new List<string>(),
+                        ExampleValue = ""
+                    });
+                }
             }
 
-            // Excelにあって定義にない列を末尾に追加
-            foreach (var ec in excelColumns)
+            // キー列が消えた場合は先頭列をキーに補正
+            if (!merged.Any(c => c.IsKey) && merged.Count > 0)
             {
-                if (!usedLetters.Contains(ec.ColumnLetter))
-                {
-                    merged.Add(ec);
-                }
+                merged[0].IsKey = true;
+                merged[0].IsRequired = true;
             }
 
             return merged;
+        }
+
+        private static string NormalizeColumnName(string name)
+        {
+            return (name ?? "").Trim();
         }
 
         private static string IndexToColumnLetter(int colIndex)
