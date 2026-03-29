@@ -1105,9 +1105,12 @@ namespace ExcelChatAddin
                 bool isUpdateTarget = !string.IsNullOrWhiteSpace(_selectedUpdateTable)
                     && string.Equals(schema.TableName, _selectedUpdateTable, StringComparison.OrdinalIgnoreCase);
 
+                var liveNameToLetter = GetLiveHeaderNameToLetter(app.ActiveWorkbook, schema.TableName);
+                var keyColName = schema.Columns.FirstOrDefault(c => c.IsKey)?.ColumnName ?? "";
+
                 sb2.AppendLine($"【テーブル項目定義: {schema.TableName}】" + (isUpdateTarget ? "（★更新対象）" : "（参考）"));
                 sb2.AppendLine($"ヘッダー行: {schema.HeaderRow}  データ開始行: {schema.DataStartRow}");
-                sb2.AppendLine($"キー列: {schema.KeyColumnLetter}");
+                sb2.AppendLine($"キー列: {(string.IsNullOrWhiteSpace(keyColName) ? schema.KeyColumnLetter : keyColName)}");
                 sb2.AppendLine($"値ポリシー: {schema.ValuePolicy}");
                 sb2.AppendLine();
                 sb2.AppendLine("| 列位置 | 列名 | キー | 必須 | 型 | 値候補 | 記載例 |");
@@ -1116,7 +1119,12 @@ namespace ExcelChatAddin
                 {
                     var allowed = (c.AllowedValues != null && c.AllowedValues.Count > 0)
                         ? string.Join(", ", c.AllowedValues) : "";
-                    sb2.AppendLine($"| {c.ColumnLetter} | {c.ColumnName} | {(c.IsKey ? "○" : "")} | {(c.IsRequired ? "○" : "")} | {c.ValueType} | {allowed} | {c.ExampleValue} |");
+                    var dispLetter = c.ColumnLetter;
+                    if (liveNameToLetter.TryGetValue(NormalizeHeaderName(c.ColumnName), out var liveLetter))
+                    {
+                        dispLetter = liveLetter;
+                    }
+                    sb2.AppendLine($"| {dispLetter} | {c.ColumnName} | {(c.IsKey ? "○" : "")} | {(c.IsRequired ? "○" : "")} | {c.ValueType} | {allowed} | {c.ExampleValue} |");
                 }
                 sb2.AppendLine();
             }
@@ -1870,40 +1878,24 @@ namespace ExcelChatAddin
             if (schema == null || string.IsNullOrWhiteSpace(schema.TableName)) return 0;
             if (schema.Columns == null || schema.Columns.Count == 0) return 0;
 
-            // テーブルを検索
-            Excel.ListObject targetTable = null;
-            Excel.Worksheet ws = null;
+            Excel.ListObject targetTable;
+            Excel.Worksheet ws;
             var wb = app.ActiveWorkbook;
             if (wb == null) return 0;
+            if (!TryFindTableByName(wb, schema.TableName, out ws, out targetTable)) return 0;
 
-            foreach (Excel.Worksheet sheet in wb.Worksheets)
-            {
-                if (sheet.ListObjects == null) continue;
-                foreach (Excel.ListObject lo in sheet.ListObjects)
-                {
-                    if (string.Equals(lo.Name, schema.TableName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        targetTable = lo;
-                        ws = sheet;
-                        break;
-                    }
-                }
-                if (targetTable != null) break;
-            }
+            var liveNameToColumn = GetLiveHeaderNameToColumnIndex(targetTable);
+            if (liveNameToColumn.Count == 0) return 0;
 
-            if (targetTable == null || ws == null) return 0;
-
-            // 列名→列インデックスのマップを構築
-            var colMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-            foreach (var c in schema.Columns)
-            {
-                int idx = ColumnLetterToIndex(c.ColumnLetter);
-                if (idx > 0) colMap[c.ColumnName] = idx;
-            }
+            var allowedNames = new HashSet<string>(schema.Columns.Select(c => NormalizeHeaderName(c.ColumnName)), StringComparer.OrdinalIgnoreCase);
 
             var keyCol = schema.Columns.FirstOrDefault(c => c.IsKey);
-            if (keyCol == null) return 0;
-            int keyColIdx = ColumnLetterToIndex(keyCol.ColumnLetter);
+            int keyColIdx = 0;
+            if (keyCol != null)
+            {
+                liveNameToColumn.TryGetValue(NormalizeHeaderName(keyCol.ColumnName), out keyColIdx);
+                if (keyColIdx <= 0) keyColIdx = ColumnLetterToIndex(keyCol.ColumnLetter);
+            }
             if (keyColIdx <= 0) return 0;
 
             int applied = 0;
@@ -1916,10 +1908,10 @@ namespace ExcelChatAddin
                     var fields = op["fields"] as JObject;
                     if (string.IsNullOrWhiteSpace(keyValue) || fields == null) continue;
 
-                    // 既存行を検索
                     int targetRow = -1;
                     int dataStart = schema.DataStartRow;
                     int lastRow = ws.Cells[ws.Rows.Count, keyColIdx].End[Excel.XlDirection.xlUp].Row;
+                    if (lastRow < dataStart) lastRow = dataStart - 1;
 
                     for (int r = dataStart; r <= lastRow; r++)
                     {
@@ -1935,19 +1927,19 @@ namespace ExcelChatAddin
 
                     if (targetRow < 0 && (opType == "upsert" || opType == "insert"))
                     {
-                        // 新規行: テーブル末尾の次
-                        targetRow = lastRow + 1;
+                        targetRow = Math.Max(lastRow + 1, dataStart);
                         (ws.Cells[targetRow, keyColIdx] as Excel.Range).Value2 = keyValue;
                     }
                     else if (targetRow < 0)
                     {
-                        continue; // update だが行が見つからない
+                        continue;
                     }
 
-                    // fields を書き込み
                     foreach (var prop in fields.Properties())
                     {
-                        if (colMap.TryGetValue(prop.Name, out int colIdx))
+                        var propName = NormalizeHeaderName(prop.Name);
+                        if (!allowedNames.Contains(propName)) continue;
+                        if (liveNameToColumn.TryGetValue(propName, out int colIdx))
                         {
                             (ws.Cells[targetRow, colIdx] as Excel.Range).Value2 = prop.Value?.ToString() ?? "";
                         }
@@ -1958,10 +1950,93 @@ namespace ExcelChatAddin
                 catch { }
             }
 
-            // テーブル範囲を拡張（新規行がある場合）
-            try { targetTable.Resize(targetTable.Range.Resize[targetTable.Range.Rows.Count, targetTable.Range.Columns.Count]); } catch { }
-
             return applied;
+        }
+
+        private static bool TryFindTableByName(Excel.Workbook wb, string tableName, out Excel.Worksheet ws, out Excel.ListObject lo)
+        {
+            ws = null;
+            lo = null;
+            if (wb == null || string.IsNullOrWhiteSpace(tableName)) return false;
+            try
+            {
+                foreach (Excel.Worksheet sheet in wb.Worksheets)
+                {
+                    if (sheet.ListObjects == null) continue;
+                    foreach (Excel.ListObject t in sheet.ListObjects)
+                    {
+                        if (string.Equals(t.Name, tableName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            ws = sheet;
+                            lo = t;
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        private static Dictionary<string, int> GetLiveHeaderNameToColumnIndex(Excel.ListObject table)
+        {
+            var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var header = table?.HeaderRowRange;
+                if (header == null) return map;
+                for (int c = 1; c <= header.Columns.Count; c++)
+                {
+                    var cell = header.Cells[1, c] as Excel.Range;
+                    var name = NormalizeHeaderName(Convert.ToString(cell?.Value2) ?? "");
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    var absCol = (int)(cell?.Column ?? 0);
+                    if (absCol > 0) map[name] = absCol;
+                }
+            }
+            catch { }
+            return map;
+        }
+
+        private static Dictionary<string, string> GetLiveHeaderNameToLetter(Excel.Workbook wb, string tableName)
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            Excel.Worksheet ws;
+            Excel.ListObject lo;
+            if (!TryFindTableByName(wb, tableName, out ws, out lo)) return map;
+            try
+            {
+                var header = lo.HeaderRowRange;
+                if (header == null) return map;
+                for (int c = 1; c <= header.Columns.Count; c++)
+                {
+                    var cell = header.Cells[1, c] as Excel.Range;
+                    var name = NormalizeHeaderName(Convert.ToString(cell?.Value2) ?? "");
+                    if (string.IsNullOrWhiteSpace(name)) continue;
+                    var absCol = (int)(cell?.Column ?? 0);
+                    if (absCol <= 0) continue;
+                    map[name] = IndexToColumnLetter(absCol);
+                }
+            }
+            catch { }
+            return map;
+        }
+
+        private static string NormalizeHeaderName(string s)
+        {
+            return (s ?? "").Trim();
+        }
+
+        private static string IndexToColumnLetter(int colIndex)
+        {
+            var result = "";
+            while (colIndex > 0)
+            {
+                colIndex--;
+                result = (char)('A' + colIndex % 26) + result;
+                colIndex /= 26;
+            }
+            return result;
         }
 
         private static int ColumnLetterToIndex(string letter)
@@ -2049,7 +2124,6 @@ namespace ExcelChatAddin
                 .Select(x => (x ?? "").Trim())
                 .ToList();
 
-            // 例: A-001: 田中 / マクロ初版作成 / 期限 2026-04-05
             var re = new Regex(@"^[\-・\*\s]*(?<id>[A-Za-z]+[-_]?\d+)\s*[:：]\s*(?<rest>.+)$", RegexOptions.Compiled);
 
             foreach (var ln in lines)
