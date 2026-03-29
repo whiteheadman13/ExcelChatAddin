@@ -1798,8 +1798,24 @@ namespace ExcelChatAddin
                         return;
                     }
 
-                    int applied = ApplyJsonOperations(app, schema, ops);
-                    MessageBox.Show($"反映しました。{applied} 行を更新/挿入しました。", "反映");
+                    // 差分計算
+                    var diffEntries = BuildDiffEntries(app, schema, ops);
+                    if (diffEntries == null || diffEntries.Count == 0)
+                    {
+                        MessageBox.Show("変更差分がありません（既に最新の状態です）。", "反映");
+                        return;
+                    }
+
+                    // プレビューダイアログで確認後に適用
+                    using (var dlg = new DiffPreviewDialog(schema.TableName, diffEntries))
+                    {
+                        dlg.ShowDialog();
+                        if (!dlg.Confirmed || dlg.SelectedEntries.Count == 0)
+                            return;
+
+                        int applied = ApplyDiffEntries(app, schema, dlg.SelectedEntries);
+                        MessageBox.Show($"反映しました。{applied} 件を更新/挿入しました。", "反映");
+                    }
                     return;
                 }
 
@@ -1945,6 +1961,155 @@ namespace ExcelChatAddin
                         }
                     }
 
+                    applied++;
+                }
+                catch { }
+            }
+
+            return applied;
+        }
+
+        /// <summary>
+        /// JSON operationsから差分エントリを計算する（書き込みは行わない）。
+        /// </summary>
+        private List<DiffEntry> BuildDiffEntries(Excel.Application app, IssueSchemaConfig schema, List<JObject> operations)
+        {
+            var result = new List<DiffEntry>();
+            if (schema == null || schema.Columns == null || schema.Columns.Count == 0) return result;
+
+            var wb = app.ActiveWorkbook;
+            if (wb == null) return result;
+
+            Excel.ListObject targetTable;
+            Excel.Worksheet ws;
+            if (!TryFindTableByName(wb, schema.TableName, out ws, out targetTable)) return result;
+
+            var liveNameToColumn = GetLiveHeaderNameToColumnIndex(targetTable);
+            if (liveNameToColumn.Count == 0) return result;
+
+            var allowedNames = new HashSet<string>(
+                schema.Columns.Select(c => NormalizeHeaderName(c.ColumnName)),
+                StringComparer.OrdinalIgnoreCase);
+
+            var keyCol = schema.Columns.FirstOrDefault(c => c.IsKey);
+            int keyColIdx = 0;
+            if (keyCol != null)
+            {
+                liveNameToColumn.TryGetValue(NormalizeHeaderName(keyCol.ColumnName), out keyColIdx);
+                if (keyColIdx <= 0) keyColIdx = ColumnLetterToIndex(keyCol.ColumnLetter);
+            }
+            if (keyColIdx <= 0) return result;
+
+            int dataStart = schema.DataStartRow;
+            int lastRow = ws.Cells[ws.Rows.Count, keyColIdx].End[Excel.XlDirection.xlUp].Row;
+            if (lastRow < dataStart) lastRow = dataStart - 1;
+
+            foreach (var op in operations)
+            {
+                try
+                {
+                    var keyValue = (op["key"]?.ToString() ?? "").Trim();
+                    var fields = op["fields"] as JObject;
+                    if (string.IsNullOrWhiteSpace(keyValue) || fields == null) continue;
+
+                    var opType = (op["type"]?.ToString() ?? "upsert").ToLowerInvariant();
+
+                    // 既存行を検索
+                    int targetRow = -1;
+                    for (int r = dataStart; r <= lastRow; r++)
+                    {
+                        var cellVal = Convert.ToString((ws.Cells[r, keyColIdx] as Excel.Range)?.Value2) ?? "";
+                        if (string.Equals(cellVal.Trim(), keyValue, StringComparison.OrdinalIgnoreCase))
+                        {
+                            targetRow = r;
+                            break;
+                        }
+                    }
+
+                    bool isNew = targetRow < 0 && (opType == "upsert" || opType == "insert");
+                    if (targetRow < 0 && !isNew) continue;
+
+                    int newRowNum = isNew ? Math.Max(lastRow + 1, dataStart) : targetRow;
+
+                    // 新規行: キー列エントリを先に追加
+                    if (isNew)
+                    {
+                        result.Add(new DiffEntry
+                        {
+                            KeyValue = keyValue,
+                            FieldName = keyCol?.ColumnName ?? "キー",
+                            OldValue = "—",
+                            NewValue = keyValue,
+                            IsNewRow = true,
+                            TargetRow = newRowNum,
+                            TargetCol = keyColIdx,
+                            KeyColIdx = keyColIdx,
+                            OpType = opType
+                        });
+                    }
+
+                    foreach (var prop in fields.Properties())
+                    {
+                        var propName = NormalizeHeaderName(prop.Name);
+                        if (!allowedNames.Contains(propName)) continue;
+                        if (!liveNameToColumn.TryGetValue(propName, out int colIdx)) continue;
+
+                        var newValue = prop.Value?.ToString() ?? "";
+                        var oldValue = "";
+
+                        if (!isNew)
+                        {
+                            oldValue = Convert.ToString((ws.Cells[targetRow, colIdx] as Excel.Range)?.Value2) ?? "";
+                        }
+
+                        // 値が同じならスキップ
+                        if (!isNew && string.Equals(oldValue.Trim(), newValue.Trim(), StringComparison.Ordinal))
+                            continue;
+
+                        result.Add(new DiffEntry
+                        {
+                            KeyValue = keyValue,
+                            FieldName = prop.Name,
+                            OldValue = isNew ? "—" : oldValue,
+                            NewValue = newValue,
+                            IsNewRow = isNew,
+                            TargetRow = newRowNum,
+                            TargetCol = colIdx,
+                            KeyColIdx = keyColIdx,
+                            OpType = opType
+                        });
+                    }
+
+                    // 新規行はlastRowを進める
+                    if (isNew) lastRow = newRowNum;
+                }
+                catch { }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// プレビューで選択された差分エントリを実際にシートに書き込む。
+        /// </summary>
+        private int ApplyDiffEntries(Excel.Application app, IssueSchemaConfig schema, List<DiffEntry> entries)
+        {
+            if (entries == null || entries.Count == 0) return 0;
+
+            var wb = app.ActiveWorkbook;
+            if (wb == null) return 0;
+
+            Excel.ListObject targetTable;
+            Excel.Worksheet ws;
+            if (!TryFindTableByName(wb, schema.TableName, out ws, out targetTable)) return 0;
+
+            int applied = 0;
+
+            foreach (var e in entries)
+            {
+                try
+                {
+                    (ws.Cells[e.TargetRow, e.TargetCol] as Excel.Range).Value2 = e.NewValue;
                     applied++;
                 }
                 catch { }
