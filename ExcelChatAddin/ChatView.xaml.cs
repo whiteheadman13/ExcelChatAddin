@@ -237,7 +237,7 @@ namespace ExcelChatAddin
         }
 
         private static readonly Regex JsonBlockRegex = new Regex(
-            @"```(?:json)?\s*\r?\n?(?<body>[\s\S]*?)\r?\n?```",
+            @"```(?:json)?[ \t]*\r?\n?(?<body>[\s\S]*?)```",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         private StackPanel BuildMessageBody(string displayText)
@@ -709,7 +709,14 @@ namespace ExcelChatAddin
 
             var displayText = ReplaceRangeRefsForDisplay(text ?? "");
 
-            if (TryParseMarkdownTable(displayText ?? "", out var tableRows))
+            // JSONブロック検出を最優先（```json ... ``` を含む場合はBuildMessageBodyで処理）
+            if (JsonBlockRegex.IsMatch(displayText ?? ""))
+            {
+                var bodyPanel = BuildMessageBody(displayText ?? "");
+                grid.Children.Add(bodyPanel);
+                Grid.SetRow(bodyPanel, 1);
+            }
+            else if (TryParseMarkdownTable(displayText ?? "", out var tableRows))
             {
                 var expander = CreateCollapsibleTable(tableRows);
                 grid.Children.Add(expander);
