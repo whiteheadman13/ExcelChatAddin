@@ -225,6 +225,16 @@
     <Compile Include="RegisterDialog.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="SchemaTemplateListDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="SchemaTemplateManager.cs" />
+    <Compile Include="SchemaTemplateSaveDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="SchemaTemplateTableNameDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="TaskPaneHost.cs">
       <SubType>UserControl</SubType>
     </Compile>

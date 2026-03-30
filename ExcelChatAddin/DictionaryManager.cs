@@ -14,6 +14,7 @@ namespace ExcelChatAddin
         private Button _btnSave;
         private Button _btnClose;
         private Button _btnDelete;
+        private Button _btnAdd;
         private Dictionary<string, string> _originalData;
 
         public DictionaryManager()
@@ -55,6 +56,9 @@ namespace ExcelChatAddin
             _btnDelete = new Button { Text = "選択行を削除", Location = new Point(10, 10), Width = 100, ForeColor = Color.Red };
             _btnDelete.Click += BtnDelete_Click;
 
+            _btnAdd = new Button { Text = "新規登録", Location = new Point(120, 10), Width = 100 };
+            _btnAdd.Click += BtnAdd_Click;
+
             _btnSave = new Button { Text = "更新して保存", Location = new Point(350, 10), Width = 100, Font = new Font(DefaultFont, FontStyle.Bold) };
             _btnSave.Click += BtnSave_Click;
 
@@ -62,6 +66,7 @@ namespace ExcelChatAddin
             _btnClose.Click += (s, e) => this.Close();
 
             pnlBottom.Controls.Add(_btnDelete);
+            pnlBottom.Controls.Add(_btnAdd);
             pnlBottom.Controls.Add(_btnSave);
             pnlBottom.Controls.Add(_btnClose);
 
@@ -128,6 +133,36 @@ namespace ExcelChatAddin
                 {
                     _grid.Rows.Add(original, placeholder);
                 }
+            }
+        }
+
+        private void BtnAdd_Click(object sender, EventArgs e)
+        {
+            using (var dlg = new RegisterDialog(null))
+            {
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+
+                string original = dlg.TargetText;
+
+                string error = DictionaryManagerLogic.ValidateNewEntry(original, _originalData);
+                if (error != null)
+                {
+                    MessageBox.Show(error, "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (dlg.IsNewCategory)
+                {
+                    string placeholder = DictionaryManagerLogic.GeneratePlaceholder(
+                        dlg.SelectedCategory, (ICollection<string>)_originalData.Values);
+                    _originalData[original] = placeholder;
+                }
+                else if (!string.IsNullOrWhiteSpace(dlg.SelectedPlaceholder))
+                {
+                    _originalData[original] = dlg.SelectedPlaceholder;
+                }
+
+                ApplyFilter();
             }
         }
 

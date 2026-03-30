@@ -294,8 +294,43 @@
 |---|---|
 | `AppData/OfficeChatMasking/rules.json` | マスキング辞書 |
 | `AppData/OfficeChatMasking/categories.txt` | カテゴリ履歴 |
-| `AppData/OfficeChatMasking/diagram_templates.json` | テンプレート保存 |
+| `AppData/OfficeChatMasking/diagram_templates.json` | チャットプロンプトテンプレート保存 |
+| `AppData/OfficeChatMasking/schema_templates.json` | 表スキーマテンプレート保存 |
 | `AppData/OfficeChatMasking/config.json` | 将来/既存設定用 |
+
+## Session Update (辞書管理画面に新規登録機能を追加)
+- 事象: 辞書管理画面から新しいマスキングルールを直接登録する手段がない。
+- 修正内容:
+  1. `DictionaryManagerLogic` にバリデーション (`ValidateNewEntry`) とプレースホルダー生成 (`GeneratePlaceholder`) を追加
+  2. `RegisterDialog` を改修: `targetText` が null のとき「対象」欄をテキストボックスに変更し、ユーザーが直接入力可能に。`TargetText` プロパティを追加
+  3. `DictionaryManager` に「新規登録」ボタンを追加し、`RegisterDialog(null)` で呼び出してエントリを追加
+- 対象モジュール:
+  - `ExcelChatAddin/DictionaryManagerLogic.cs`
+  - `ExcelChatAddin/RegisterDialog.cs`
+  - `ExcelChatAddin/DictionaryManager.cs`
+
+## Session Update (表スキーマテンプレート機能)
+- 事象: 登録済みの表スキーマ定義をテンプレートとして保存・再利用したい。
+- 要望:
+  1. 表設定ダイアログで現在の定義を「テンプレートとして保存」
+  2. テンプレート一覧から選択して現在のグリッドに列定義を流し込み（テンプレートから挿入）
+  3. テンプレート一覧から名前・説明・列定義を編集（テンプレート編集）
+- 修正内容:
+  1. `Paths.cs` に `SchemaTemplatesPath` を追加（`schema_templates.json`）
+  2. `SchemaTemplateManager.cs` を新規作成（モデル `SchemaTemplateEntry` + CRUD）
+  3. `SchemaTemplateSaveDialog.cs` を新規作成（テンプレート名・説明入力ダイアログ）
+  4. `SchemaTemplateListDialog.cs` を新規作成（テンプレート一覧・選択・編集・削除ダイアログ）
+  5. `SchemaTemplateTableNameDialog.cs` を新規作成（テンプレート挿入時のテーブル名入力ダイアログ）
+  6. `IssueSchemaSettingsDialog.cs` にボタン2つ追加（テンプレート保存 / テンプレートから挿入）
+     - テンプレートから挿入時: テーブル名入力 → 同名テーブル存在チェック → 新シート＋テーブル自動作成 → 定義保存
+  7. `module_list.md` を更新
+- 対象モジュール:
+  - `ExcelChatAddin/Paths.cs`
+  - `ExcelChatAddin/SchemaTemplateManager.cs`（新規）
+  - `ExcelChatAddin/SchemaTemplateSaveDialog.cs`（新規）
+  - `ExcelChatAddin/SchemaTemplateListDialog.cs`（新規）
+  - `ExcelChatAddin/SchemaTemplateTableNameDialog.cs`（新規）
+  - `ExcelChatAddin/IssueSchemaSettingsDialog.cs`
 
 ## Change Procedure
 1. 修正対象の機能を確認する。

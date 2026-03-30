@@ -110,6 +110,20 @@ namespace ExcelChatAddin
             _grid.DataError += (s, e) => { e.ThrowException = false; };
 
             var bottom = new Panel { Dock = DockStyle.Bottom, Height = 52 };
+            var btnTemplateSave = new Button
+            {
+                Text = "テンプレート保存",
+                Width = 120,
+                Height = 30,
+                Location = new Point(12, 10)
+            };
+            var btnTemplateLoad = new Button
+            {
+                Text = "テンプレートから挿入",
+                Width = 130,
+                Height = 30,
+                Location = new Point(142, 10)
+            };
             var btnSave = new Button
             {
                 Text = "保存",
@@ -137,7 +151,11 @@ namespace ExcelChatAddin
             btnSave.Click += BtnSave_Click;
             btnDelete.Click += BtnDelete_Click;
             btnClose.Click += (s, e) => Close();
+            btnTemplateSave.Click += BtnTemplateSave_Click;
+            btnTemplateLoad.Click += BtnTemplateLoad_Click;
 
+            bottom.Controls.Add(btnTemplateSave);
+            bottom.Controls.Add(btnTemplateLoad);
             bottom.Controls.Add(btnSave);
             bottom.Controls.Add(btnDelete);
             bottom.Controls.Add(btnClose);
@@ -598,6 +616,271 @@ namespace ExcelChatAddin
             {
                 MessageBox.Show("削除に失敗しました: " + ex.Message);
             }
+        }
+
+        private void BtnTemplateSave_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                _grid.EndEdit();
+
+                var cols = CollectColumnsFromGrid();
+                if (cols == null || cols.Count == 0)
+                {
+                    MessageBox.Show("テンプレートに保存する列定義がありません。\n先にグリッドに列を定義してください。");
+                    return;
+                }
+
+                var tableName = ExtractTableName(_cmbTableName.Text);
+                var defaultName = string.IsNullOrWhiteSpace(tableName) ? "" : tableName + " テンプレート";
+
+                using (var dlg = new SchemaTemplateSaveDialog(defaultName))
+                {
+                    if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                    if (string.IsNullOrWhiteSpace(dlg.TemplateName))
+                    {
+                        MessageBox.Show("テンプレート名を入力してください。", "入力エラー");
+                        return;
+                    }
+
+                    var schema = new IssueSchemaConfig
+                    {
+                        HeaderRow = (int)_numHeaderRow.Value,
+                        DataStartRow = (int)_numDataStartRow.Value,
+                        Columns = cols
+                    };
+
+                    var entry = SchemaTemplateManager.FromSchema(schema, dlg.TemplateName, dlg.TemplateDescription);
+                    var items = SchemaTemplateManager.LoadAll();
+                    items.Add(entry);
+                    SchemaTemplateManager.SaveAll(items);
+
+                    MessageBox.Show($"テンプレート「{dlg.TemplateName}」を保存しました。");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("テンプレート保存に失敗しました: " + ex.Message);
+            }
+        }
+
+        private void BtnTemplateLoad_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var items = SchemaTemplateManager.LoadAll();
+                if (items.Count == 0)
+                {
+                    MessageBox.Show("保存済みのテンプレートがありません。");
+                    return;
+                }
+
+                SchemaTemplateEntry tmpl;
+                using (var dlg = new SchemaTemplateListDialog())
+                {
+                    if (dlg.ShowDialog(this) != DialogResult.OK || dlg.SelectedTemplate == null) return;
+                    tmpl = dlg.SelectedTemplate;
+                }
+
+                // テーブル名を入力してもらう
+                string newTableName;
+                using (var nameDlg = new SchemaTemplateTableNameDialog(tmpl.Name))
+                {
+                    if (nameDlg.ShowDialog(this) != DialogResult.OK) return;
+                    newTableName = nameDlg.TableName;
+                }
+
+                if (string.IsNullOrWhiteSpace(newTableName))
+                {
+                    MessageBox.Show("テーブル名を入力してください。", "入力エラー");
+                    return;
+                }
+
+                // 同名テーブルがExcelに存在するかチェック
+                if (ExcelTableExists(newTableName))
+                {
+                    MessageBox.Show($"テーブル「{newTableName}」は既にExcelブック内に存在します。\n別のテーブル名を指定してください。",
+                        "テーブル名重複", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // グリッドにテンプレート列定義を反映
+                _numHeaderRow.Value = Math.Max(1, tmpl.HeaderRow);
+                _numDataStartRow.Value = Math.Max(2, tmpl.DataStartRow);
+
+                _grid.Rows.Clear();
+                if (tmpl.Columns != null)
+                {
+                    foreach (var c in tmpl.Columns)
+                    {
+                        _grid.Rows.Add(
+                            c.ColumnLetter ?? "",
+                            c.ColumnName ?? "",
+                            c.IsKey,
+                            c.IsRequired,
+                            string.IsNullOrWhiteSpace(c.ValueType) ? "text" : c.ValueType,
+                            string.Join(",", c.AllowedValues ?? new List<string>()),
+                            c.ExampleValue ?? "",
+                            c.Meaning ?? "",
+                            string.IsNullOrWhiteSpace(c.UpdateMode) ? "overwrite" : c.UpdateMode);
+                    }
+                }
+
+                // スキーマ定義を構築・保存
+                var cols = CollectColumnsFromGrid();
+                if (cols == null || cols.Count == 0)
+                {
+                    MessageBox.Show("テンプレートに列定義がありません。");
+                    return;
+                }
+
+                var keyCols = cols.Where(x => x.IsKey).ToList();
+                var cfg = new IssueSchemaConfig
+                {
+                    TableName = newTableName,
+                    SheetName = newTableName,
+                    HeaderRow = (int)_numHeaderRow.Value,
+                    DataStartRow = (int)_numDataStartRow.Value,
+                    ValuePolicy = "strict",
+                    KeyColumnLetter = keyCols.Count > 0 ? keyCols[0].ColumnLetter : (cols.Count > 0 ? cols[0].ColumnLetter : "A"),
+                    Columns = cols
+                };
+
+                IssueSchemaManager.Upsert(_store, cfg);
+                IssueSchemaManager.SaveStore(_store);
+
+                // 新しいシートとExcelテーブルを作成
+                CreateNewSheetWithTable(cfg);
+
+                // ComboBoxを更新して新テーブルを選択
+                PopulateTableNames();
+                for (int i = 0; i < _cmbTableName.Items.Count; i++)
+                {
+                    if (ExtractTableName(_cmbTableName.Items[i].ToString())
+                        .Equals(newTableName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        _suppressTableSwitch = true;
+                        _cmbTableName.SelectedIndex = i;
+                        _suppressTableSwitch = false;
+                        break;
+                    }
+                }
+
+                MessageBox.Show($"テンプレート「{tmpl.Name}」から新しいテーブル「{newTableName}」を作成しました。");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("テンプレートからの挿入に失敗しました: " + ex.Message);
+            }
+        }
+
+        private bool ExcelTableExists(string tableName)
+        {
+            try
+            {
+                var wb = _excelApp?.ActiveWorkbook;
+                if (wb == null) return false;
+
+                foreach (Excel.Worksheet ws in wb.Worksheets)
+                {
+                    if (ws.ListObjects == null) continue;
+                    foreach (Excel.ListObject lo in ws.ListObjects)
+                    {
+                        if (string.Equals(lo.Name, tableName, StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        private void CreateNewSheetWithTable(IssueSchemaConfig cfg)
+        {
+            if (_excelApp == null || cfg == null || cfg.Columns == null || cfg.Columns.Count == 0) return;
+
+            var wb = _excelApp.ActiveWorkbook;
+            if (wb == null) return;
+
+            var ws = wb.Worksheets.Add() as Excel.Worksheet;
+            if (ws == null) return;
+            try { ws.Name = cfg.TableName; } catch { }
+
+            // ヘッダー書き込み
+            foreach (var c in cfg.Columns)
+            {
+                int col = ColumnLetterToIndex(c.ColumnLetter);
+                if (col <= 0) continue;
+                var headerCell = ws.Cells[cfg.HeaderRow, col] as Excel.Range;
+                if (headerCell != null) headerCell.Value2 = c.ColumnName;
+            }
+
+            // Excelテーブル作成
+            int minCol = cfg.Columns.Min(c => ColumnLetterToIndex(c.ColumnLetter));
+            int maxCol = cfg.Columns.Max(c => ColumnLetterToIndex(c.ColumnLetter));
+            if (minCol <= 0 || maxCol <= 0) return;
+
+            int endRow = Math.Max(cfg.DataStartRow, cfg.HeaderRow + 1);
+            var topLeft = ws.Cells[cfg.HeaderRow, minCol] as Excel.Range;
+            var bottomRight = ws.Cells[endRow, maxCol] as Excel.Range;
+            var tableRange = ws.Range[topLeft, bottomRight];
+            if (tableRange == null) return;
+
+            try
+            {
+                var lo = ws.ListObjects.Add(
+                    Excel.XlListObjectSourceType.xlSrcRange,
+                    tableRange,
+                    Type.Missing,
+                    Excel.XlYesNoGuess.xlYes,
+                    Type.Missing);
+
+                if (lo != null)
+                {
+                    try { lo.Name = cfg.TableName; } catch { }
+                }
+            }
+            catch { }
+        }
+
+        private List<IssueSchemaColumn> CollectColumnsFromGrid()
+        {
+            var cols = new List<IssueSchemaColumn>();
+            foreach (DataGridViewRow row in _grid.Rows)
+            {
+                if (row.IsNewRow) continue;
+
+                string letter = (row.Cells["ColumnLetter"].Value?.ToString() ?? "").Trim().ToUpperInvariant().Replace("$", "");
+                string name = (row.Cells["ColumnName"].Value?.ToString() ?? "").Trim();
+
+                if (string.IsNullOrWhiteSpace(letter) && string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                string valueType = (row.Cells["ValueType"].Value?.ToString() ?? "text").Trim().ToLowerInvariant();
+                string allowedCsv = (row.Cells["AllowedValues"].Value?.ToString() ?? "").Trim();
+                string updateMode = (row.Cells["UpdateMode"].Value?.ToString() ?? "overwrite").Trim().ToLowerInvariant();
+
+                var allowed = allowedCsv
+                    .Split(new[] { ',', '、', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(x => x.Trim())
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                cols.Add(new IssueSchemaColumn
+                {
+                    ColumnLetter = letter,
+                    ColumnName = name,
+                    IsKey = Convert.ToBoolean(row.Cells["IsKey"].Value ?? false),
+                    IsRequired = Convert.ToBoolean(row.Cells["IsRequired"].Value ?? false),
+                    ValueType = valueType,
+                    AllowedValues = allowed,
+                    ExampleValue = (row.Cells["ExampleValue"].Value?.ToString() ?? "").Trim(),
+                    Meaning = (row.Cells["Meaning"].Value?.ToString() ?? "").Trim(),
+                    UpdateMode = updateMode
+                });
+            }
+            return cols;
         }
 
         private string ExtractTableName(string rawText)

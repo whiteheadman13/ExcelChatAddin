@@ -14,8 +14,10 @@ namespace ExcelChatAddin
         public string SelectedCategory { get; private set; }
         public string SelectedPlaceholder { get; private set; }
         public bool IsNewCategory { get; private set; }
+        public string TargetText { get; private set; }
 
         // UIパーツ
+        private TextBox _txtTarget;
         private ComboBox _cmbNewCategory; // ★TextBoxからComboBoxに変更（履歴用）
         private ComboBox _cmbExisting;
         private RadioButton _rbNew;
@@ -52,12 +54,35 @@ namespace ExcelChatAddin
             this.MinimizeBox = false;
 
             // 1. 対象単語の表示
-            var lblTarget = new Label { 
-                Text = $"対象: {targetText}", 
-                Location = new Point(20, 15), 
-                Size = new Size(400, 20),
+            var lblTargetCaption = new Label
+            {
+                Text = "対象:",
+                Location = new Point(20, 18),
+                AutoSize = true,
                 Font = new Font(this.Font, FontStyle.Bold)
             };
+
+            Control targetControl;
+            if (string.IsNullOrEmpty(targetText))
+            {
+                _txtTarget = new TextBox
+                {
+                    Location = new Point(60, 15),
+                    Size = new Size(360, 20)
+                };
+                targetControl = _txtTarget;
+            }
+            else
+            {
+                TargetText = targetText;
+                targetControl = new Label
+                {
+                    Text = targetText,
+                    Location = new Point(60, 18),
+                    Size = new Size(360, 20),
+                    Font = new Font(this.Font, FontStyle.Bold)
+                };
+            }
 
             // --- A. 新規カテゴリ作成 (履歴機能付き) ---
             _rbNew = new RadioButton { 
@@ -150,6 +175,11 @@ namespace ExcelChatAddin
             
             // OK時の処理
             btnOk.Click += (s, e) => {
+                if (_txtTarget != null)
+                {
+                    TargetText = _txtTarget.Text.Trim();
+                }
+
                 this.IsNewCategory = _rbNew.Checked;
 
                 if (this.IsNewCategory)
@@ -178,7 +208,7 @@ namespace ExcelChatAddin
             };
 
             this.Controls.AddRange(new Control[] { 
-                lblTarget, 
+                lblTargetCaption, targetControl, 
                 _rbNew, lblCatName, _cmbNewCategory, _chkSaveCategory, _btnDeleteCategory,
                 _rbExisting, lblExistName, _cmbExisting, 
                 btnOk, btnCancel 

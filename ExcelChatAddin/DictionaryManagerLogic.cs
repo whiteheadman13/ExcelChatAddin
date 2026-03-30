@@ -27,5 +27,38 @@ namespace ExcelChatAddin
 
             return keysToRemove;
         }
+
+        /// <summary>
+        /// 新規エントリのバリデーションを行う。エラーがあればメッセージを返し、正常なら null を返す。
+        /// </summary>
+        public static string ValidateNewEntry(string original, Dictionary<string, string> existingData)
+        {
+            if (string.IsNullOrWhiteSpace(original))
+                return "元の単語を入力してください。";
+
+            if (existingData != null && existingData.ContainsKey(original))
+                return $"「{original}」は既に辞書に登録されています。";
+
+            return null;
+        }
+
+        /// <summary>
+        /// カテゴリ名から一意のプレースホルダーを生成する。
+        /// </summary>
+        public static string GeneratePlaceholder(string category, ICollection<string> existingPlaceholders)
+        {
+            string cleanCategory = (category ?? string.Empty).Trim().ToUpper().Replace(" ", "_");
+            if (string.IsNullOrEmpty(cleanCategory)) cleanCategory = "MASK";
+
+            int count = 1;
+            string placeholder;
+            do
+            {
+                placeholder = $"__{cleanCategory}_{count}__";
+                count++;
+            } while (existingPlaceholders != null && existingPlaceholders.Contains(placeholder));
+
+            return placeholder;
+        }
     }
 }
