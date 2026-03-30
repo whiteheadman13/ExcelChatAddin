@@ -134,6 +134,26 @@ namespace ExcelChatAddin
             }
         }
 
+        private void BtnReapplyMask_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // 現在のテキストを取得
+                var currentText = new TextRange(BodyBox.Document.ContentStart, BodyBox.Document.ContentEnd).Text;
+                if (string.IsNullOrWhiteSpace(currentText)) return;
+
+                // アンマスク → 再マスキング
+                string unmasked = MaskingEngine.Instance.Unmask(currentText);
+                string remasked = MaskingEngine.Instance.Mask(unmasked);
+
+                SetHighlightedText(remasked);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "マスキング再適用");
+            }
+        }
+
         private void BtnClose_Click(object sender, RoutedEventArgs e)
         {
             Close();
