@@ -3,6 +3,16 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (右クリックメニューからマスキング確認)
+- 事象: チャット欄でマスキング結果を確認できるが、右クリックメニューから直接確認する手段がない。
+- 修正内容:
+  1. `ThisAddIn.cs` の Cell CommandBar に「マスキング確認」メニュー項目を追加
+  2. クリック時に選択セル範囲のテキストを取得し、`MaskingEngine.Mask()` を適用してから `MaskPreviewWindow` で表示
+  3. クリーンアップ処理に新メニューの削除を追加
+- 対象モジュール:
+  - `ExcelChatAddin/ThisAddIn.cs`
+  - `ExcelChatAddin/MaskPreviewWindow.xaml.cs`（既存利用）
+
 ## Session Update (複数テーブル定義対応+@table記法+更新対象ComboBox)
 - 事象:
   1. table_schema.json が1テーブル分しか保持できない

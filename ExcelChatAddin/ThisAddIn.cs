@@ -19,6 +19,8 @@ namespace ExcelChatAddin
             = new Dictionary<int, TaskPaneHost>();
 
         private Office.CommandBarButton _sendBtn;
+        private Office.CommandBarButton _manageBtn;
+        private Office.CommandBarButton _previewBtn;
         private const string MENU_TAG = "OfficeChat_SendSelectionToChat";
         private bool _maskRegisterDialogOpen = false;
 
@@ -61,6 +63,7 @@ namespace ExcelChatAddin
         // 追加：マスキング関連（右クリックに追加するメニュー）
         //private const string MaskMenuTagRegister = "ExcelChatAddin.Mask.Register";
         private const string MaskMenuTagManage = "ExcelChatAddin.Mask.Manage";
+        private const string MaskMenuTagPreview = "ExcelChatAddin.Mask.Preview";
 
 
         private void ThisAddIn_Startup(object sender, EventArgs e)
@@ -68,6 +71,7 @@ namespace ExcelChatAddin
             PurgeMaskMenus();     // 全掃除
 
             AddMaskManageMenu();  // ★通常モード専用
+            AddMaskPreviewMenu(); // ★マスキング確認メニュー
             //AddMaskRegisterMenus(); // ★編集モード専用
             RegisterHotKey_CtrlShiftM();
 
@@ -117,12 +121,31 @@ namespace ExcelChatAddin
 
                 RemoveCommandBarControl(cb, MaskMenuTagManage);
 
-                var btnMng = (Office.CommandBarButton)cb.Controls.Add(
+                _manageBtn = (Office.CommandBarButton)cb.Controls.Add(
                     Office.MsoControlType.msoControlButton, Temporary: true);
 
-                btnMng.Caption = "辞書管理…";
-                btnMng.Tag = MaskMenuTagManage;
-                btnMng.Click += BtnMng_Click;
+                _manageBtn.Caption = "辞書管理…";
+                _manageBtn.Tag = MaskMenuTagManage;
+                _manageBtn.Click += BtnMng_Click;
+            }
+            catch { }
+        }
+
+        private void AddMaskPreviewMenu()
+        {
+            try
+            {
+                var cb = this.Application.CommandBars["Cell"];
+                if (cb == null) return;
+
+                RemoveCommandBarControl(cb, MaskMenuTagPreview);
+
+                _previewBtn = (Office.CommandBarButton)cb.Controls.Add(
+                    Office.MsoControlType.msoControlButton, Temporary: true);
+
+                _previewBtn.Caption = "マスキング確認";
+                _previewBtn.Tag = MaskMenuTagPreview;
+                _previewBtn.Click += BtnPreview_Click;
             }
             catch { }
         }
@@ -263,6 +286,7 @@ namespace ExcelChatAddin
 
                     //RemoveCommandBarControl(cb, MaskMenuTagRegister);
                     RemoveCommandBarControl(cb, MaskMenuTagManage);
+                    RemoveCommandBarControl(cb, MaskMenuTagPreview);
                 }
                 catch { }
             }
@@ -316,6 +340,7 @@ namespace ExcelChatAddin
                     if (cb == null) continue;
                     //RemoveCommandBarControl(cb, MaskMenuTagRegister);
                     RemoveCommandBarControl(cb, MaskMenuTagManage);
+                    RemoveCommandBarControl(cb, MaskMenuTagPreview);
                 }
                 catch { }
             }
@@ -336,6 +361,16 @@ namespace ExcelChatAddin
             try
             {
                 if (_sendBtn != null) _sendBtn.Click -= Btn_Click;
+            }
+            catch { }
+            try
+            {
+                if (_manageBtn != null) _manageBtn.Click -= BtnMng_Click;
+            }
+            catch { }
+            try
+            {
+                if (_previewBtn != null) _previewBtn.Click -= BtnPreview_Click;
             }
             catch { }
 
@@ -460,6 +495,65 @@ namespace ExcelChatAddin
         //        _registerDialogOpen = false;
         //    }
         //}
+
+        private void BtnPreview_Click(Office.CommandBarButton Ctrl, ref bool CancelDefault)
+        {
+            if (!EnsureMaskingAvailable("マスキング確認")) return;
+
+            try
+            {
+                string text = GetSelectedRangeText();
+                if (string.IsNullOrWhiteSpace(text))
+                {
+                    MessageBox.Show("セルを選択してから実行してください。", "マスキング確認");
+                    return;
+                }
+
+                string masked = MaskingEngine.Instance.Mask(text);
+
+                var owner = new System.Windows.Interop.WindowInteropHelper(new System.Windows.Window());
+                var win = new MaskPreviewWindow(masked);
+                var helper = new System.Windows.Interop.WindowInteropHelper(win);
+                helper.Owner = new IntPtr(this.Application.Hwnd);
+                win.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "マスキング確認");
+            }
+        }
+
+        private string GetSelectedRangeText()
+        {
+            try
+            {
+                var sel = this.Application.Selection as Excel.Range;
+                if (sel == null) return "";
+
+                object v = sel.Value2;
+                if (v == null) return "";
+
+                if (!(v is object[,]))
+                    return Convert.ToString(v) ?? "";
+
+                var arr = (object[,])v;
+                int r1 = arr.GetLowerBound(0), r2 = arr.GetUpperBound(0);
+                int c1 = arr.GetLowerBound(1), c2 = arr.GetUpperBound(1);
+
+                var sb = new System.Text.StringBuilder();
+                for (int r = r1; r <= r2; r++)
+                {
+                    for (int c = c1; c <= c2; c++)
+                    {
+                        if (c > c1) sb.Append('\t');
+                        sb.Append(arr[r, c]?.ToString() ?? "");
+                    }
+                    if (r < r2) sb.AppendLine();
+                }
+                return sb.ToString();
+            }
+            catch { return ""; }
+        }
 
         private void BtnMng_Click(Office.CommandBarButton Ctrl, ref bool CancelDefault)
         {
