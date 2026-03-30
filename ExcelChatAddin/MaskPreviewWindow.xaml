@@ -13,21 +13,28 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- タイトル -->
-        <TextBlock Grid.Row="0"
-                   Text="送信内容（マスキング後）"
-                   FontWeight="Bold"
-                   FontSize="16"
-                   Margin="0,0,0,8"/>
+        <!-- タイトル + 凡例 -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+            <TextBlock Text="送信内容（マスキング後）"
+                       FontWeight="Bold"
+                       FontSize="16"
+                       VerticalAlignment="Center"
+                       Margin="0,0,16,0"/>
+            <Border Background="#FFFF99" BorderBrush="#CCA000" BorderThickness="1"
+                    Padding="6,2" CornerRadius="2" VerticalAlignment="Center">
+                <TextBlock Text="■ マスキング箇所" FontSize="12" Foreground="#CC4400"/>
+            </Border>
+        </StackPanel>
 
-        <!-- 本文表示 -->
-        <TextBox Grid.Row="1"
-                 x:Name="BodyBox"
-                 IsReadOnly="True"
-                 TextWrapping="Wrap"
-                 VerticalScrollBarVisibility="Auto"
-                 FontSize="14"
-                 Padding="8"/>
+        <!-- 本文表示（RichTextBox でハイライト） -->
+        <RichTextBox x:Name="BodyBox"
+                     Grid.Row="1"
+                     IsReadOnly="True"
+                     VerticalScrollBarVisibility="Auto"
+                     HorizontalScrollBarVisibility="Auto"
+                     FontSize="14"
+                     FontFamily="Consolas, Meiryo UI, sans-serif"
+                     Padding="8"/>
 
         <!-- ボタン -->
         <StackPanel Grid.Row="2"
