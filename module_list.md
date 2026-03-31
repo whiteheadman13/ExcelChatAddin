@@ -368,3 +368,13 @@
 - 対象モジュール:
   - `ExcelChatAddin/ChatView.xaml.cs`
   - `ExcelChatAddin/ContentValidator.cs`（新規）
+
+## Session Update (更新対象テーブル選択時のデータ自動連携+送信後クリア)
+- 事象:
+  1. 更新対象テーブルを選択しても表の定義（スキーマ）しか送られず、表データ本体が連携されない
+  2. 送信後も更新対象テーブルの選択状態が残り続ける
+- 修正内容:
+  1. `BuildMaskedPayload` で `_selectedUpdateTable` が設定されている場合、そのテーブルの範囲キーを `referencedKeys` に自動追加し、表データ本体もペイロードに含める
+  2. `btnSendGemini_Click` の送信完了後（正常系・異常系とも）に `_selectedUpdateTable = null` + `cmbUpdateTarget.SelectedIndex = 0` でリセット
+- 対象モジュール:
+  - `ExcelChatAddin/ChatView.xaml.cs`

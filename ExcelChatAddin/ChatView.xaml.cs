@@ -624,6 +624,10 @@ namespace ExcelChatAddin
                 Dispatcher.Invoke(() =>
                 {
                     btnSendGemini.IsEnabled = true;
+                    // 送信完了後に更新対象テーブルをクリア
+                    _selectedUpdateTable = null;
+                    if (cmbUpdateTarget != null && cmbUpdateTarget.Items.Count > 0)
+                        cmbUpdateTarget.SelectedIndex = 0;
                 });
             }
             catch (Exception ex)
@@ -632,6 +636,10 @@ namespace ExcelChatAddin
                 {
                     RemoveLastSystemIndicator();
                     btnSendGemini.IsEnabled = true;
+                    // 送信エラー時も更新対象テーブルをクリア
+                    _selectedUpdateTable = null;
+                    if (cmbUpdateTarget != null && cmbUpdateTarget.Items.Count > 0)
+                        cmbUpdateTarget.SelectedIndex = 0;
                     MessageBox.Show(ex.Message, "Gemini送信エラー");
                 });
             }
@@ -1307,6 +1315,16 @@ namespace ExcelChatAddin
 
             // NOTE: do not auto-include implicit Selection/ActiveCell ranges.
             // Only ranges that appear in the chat history or input are included in referencedKeys.
+
+            // ★ 更新対象テーブルが選択されている場合、そのテーブルのデータも自動で参照に含める
+            if (!string.IsNullOrWhiteSpace(_selectedUpdateTable))
+            {
+                if (!referencedTableNames.Exists(x => string.Equals(x, _selectedUpdateTable, StringComparison.OrdinalIgnoreCase)))
+                    referencedTableNames.Add(_selectedUpdateTable);
+                var resolvedUpdate = ResolveTableToRangeKey(_selectedUpdateTable);
+                if (resolvedUpdate != null && !referencedKeys.Exists(x => string.Equals(x, resolvedUpdate, StringComparison.OrdinalIgnoreCase)))
+                    referencedKeys.Add(resolvedUpdate);
+            }
 
             // determine which refs need to be included in this payload
             // Note: LLM is stateless between requests, so include the mapping entries every time the key is referenced.
