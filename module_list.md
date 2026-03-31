@@ -3,6 +3,19 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (チャット表示を10行に制限 + 全文ポップアップ)
+- 事象:
+  1. 1回のチャット表示は最大10行までにしたい
+  2. 10行超過分は表示しないが、クリアまで内容は保持したい
+  3. 超過分はボタンからポップアップで確認したい
+- 修正内容:
+  1. `ChatView` に表示行数上限 `MaxVisibleChatLines=10` を追加
+  2. `AppendChat` で表示文面のみ先頭10行に制限し、超過時に「全文」ボタンを表示
+  3. 「全文」ボタン押下でポップアップウィンドウに全文表示
+  4. `Border.Tag` にロール＋全文を保持し、`GetChatHistoryText` は保持データを優先して利用
+- 対象モジュール:
+  - `ExcelChatAddin/ChatView.xaml.cs`
+
 ## Session Update (表定義画面から定義Excel出力)
 - 事象: テンプレート定義出力ではなく、通常の表定義画面から表定義をExcel出力したい。
 - 修正内容:
@@ -59,7 +72,7 @@
   1. `BuildSchemaSection` にJSON出力フォーマット指示を追加（operations/key/fields/errors）
   2. `TryParseJsonOperations` を追加: ```json``` ブロックまたは `{` で始まるJSONを抽出・パース
   3. `ApplyJsonOperations` を追加: スキーマの列名→列インデックスでマッピングし、キー列で既存行検索→upsert/insert/update
-  4. `ApplyResponseToSheet` をJSON優先→Markdown/TSVフォールバックの2段構えに変更
+  4. `ApplyResponseToSheet` をJSON優先→Markdown/TSVフォールバックの2段階に変更
 - 対象モジュール:
   - `ExcelChatAddin/ChatView.xaml.cs`
 
@@ -336,60 +349,3 @@
   5. `SchemaTemplateTableNameDialog.cs` を新規作成（テンプレート挿入時のテーブル名入力ダイアログ）
   6. `SchemaTemplateEditDialog.cs` を新規作成（テンプレートのフル編集ダイアログ: 名前・説明・行設定・列定義グリッド・ColumnDetailDialog連携）
   7. `IssueSchemaSettingsDialog.cs` にボタン2つ追加（テンプレート保存 / テンプレートから挿入）
-     - テンプレートから挿入時: テーブル名入力 → 同名テーブル存在チェック → 新シート＋テーブル自動作成 → 定義保存
-  8. `ChatRibbon.cs` に「テンプレート」グループ追加（テンプレートから挿入 / テンプレート管理）
-  9. `ThisAddIn.cs` に `ShowSchemaTemplateInsert()` / `ShowSchemaTemplateManager()` / `ExcelTableExists()` / `CreateNewSheetWithTable()` / `ColumnLetterToIndex()` を追加
-  10. `module_list.md` を更新
-- 対象モジュール:
-  - `ExcelChatAddin/Paths.cs`
-  - `ExcelChatAddin/ChatRibbon.cs`
-  - `ExcelChatAddin/ThisAddIn.cs`
-  - `ExcelChatAddin/SchemaTemplateManager.cs`（新規）
-  - `ExcelChatAddin/SchemaTemplateSaveDialog.cs`（新規）
-  - `ExcelChatAddin/SchemaTemplateListDialog.cs`（新規）
-  - `ExcelChatAddin/SchemaTemplateTableNameDialog.cs`（新規）
-  - `ExcelChatAddin/SchemaTemplateEditDialog.cs`（新規）
-  - `ExcelChatAddin/IssueSchemaSettingsDialog.cs`
-
-## Change Procedure
-1. 修正対象の機能を確認する。
-2. この `module_list.md` で関連モジュールを先に確認する。
-3. 影響範囲を絞って最小変更で実装する。
-4. 修正後はビルド/必要テストで確認する。
-
-## Session Update (差分プレビュー修正: 日付同一値・改行・シリアル値)
-- 事象:
-  1. 変更前がExcel日付シリアル値（46113等）のまま表示される
-  2. 変更前と変更後が同じ日付でも差分と誤判定される（"2026/4/1" vs "2026/04/01"）
-  3. 追記モード・改行を含む値をシートに反映すると改行が消える
-  4. edit_file操作による構文破損（if括弧欠落・ClearHighlights削除）を修正
-- 修正内容:
-  1. GetCellDisplayValue() 追加: cell.Text → 日付シリアル値検出 → yyyy/M/d 変換のフォールバック
-  2. NormalizeForComparison() 追加: 日付文字列を yyyy/M/d に正規化して比較
-  3. 差分スキップ条件を NormalizeForComparison ベースに変更
-  4. ApplyDiffEntries の書き込み時、\n を含む場合は WrapText=true を設定
-  5. ClearHighlights メソッドを ChatView.xaml.cs に復元
-  6. if (m.Index > pos) の欠落括弧を修正
-- 対象モジュール:
-  - ExcelChatAddin/ChatView.xaml.cs
-
-## Session Update (反映プレビュー: 差分詳細ポップアップ)
-- 事象: 反映プレビュー一覧で変更前と変更後を詳しく比較しにくい
-- 修正内容:
-  1. DiffPreviewDialog のグリッドに CellDoubleClick イベントを追加
-  2. DiffDetailPopup クラスを新規追加（DiffPreviewDialog.cs 内）
-     - SplitContainer で変更前(左)・変更後(右)を横並び表示
-     - RichTextBox による行単位差分ハイライト（削除行:薄赤・追加行:薄緑・太字）
-     - ESCキーで閉じる、リサイズ可能
-  3. 一覧画面下部にダブルクリックのヒントラベルを追加
-- 対象モジュール:
-  - ExcelChatAddin/DiffPreviewDialog.cs
-
-## Session Update (チャット履歴テキストの範囲選択対応)
-- 事象: チャット履歴本文をマウスで範囲選択できず、Ctrl+C でのコピーがしづらい。
-- 修正内容:
-  1. `ChatView.xaml.cs` に本文用 `TextBlock` 生成ヘルパーを追加
-  2. 本文 `TextBlock` を `IsTextSelectionEnabled = true` / `Focusable = true` で生成するよう統一
-  3. 再解析後に再構築される本文テキストも同じヘルパーを使用
-- 対象モジュール:
-  - `ExcelChatAddin/ChatView.xaml.cs`

@@ -17,6 +17,7 @@ namespace ExcelChatAddin
     {
         // 以前の "チャット上の表形式表示" は廃止。入力欄側のワンショット指定を使用します。
         private bool _requestTableForNextSend = false;
+        private const int MaxVisibleChatLines = 10;
         private string _selectedModel = "gemini-3.1-flash-lite-preview";
         private string _lastGeminiResponse = "";
         private string _lastSentRawInput = "";
@@ -239,6 +240,52 @@ namespace ExcelChatAddin
         private static readonly Regex JsonBlockRegex = new Regex(
             @"```(?:json)?[ \t]*\r?\n?(?<body>[\s\S]*?)```",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        private static int CountLines(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return 1;
+            var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+            return normalized.Split('\n').Length;
+        }
+
+        private static string TakeFirstLines(string text, int maxLines)
+        {
+            if (string.IsNullOrEmpty(text)) return text ?? "";
+            var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+            var lines = normalized.Split('\n');
+            if (lines.Length <= maxLines) return text;
+            return string.Join(Environment.NewLine, lines.Take(maxLines));
+        }
+
+        private void ShowFullMessagePopup(string role, string fullText)
+        {
+            try
+            {
+                var viewer = new TextBox
+                {
+                    Text = fullText ?? "",
+                    IsReadOnly = true,
+                    AcceptsReturn = true,
+                    TextWrapping = TextWrapping.Wrap,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    Margin = new Thickness(8)
+                };
+
+                var win = new Window
+                {
+                    Title = $"{role} 全文表示",
+                    Width = 720,
+                    Height = 520,
+                    Content = viewer,
+                    WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                    Owner = Window.GetWindow(this)
+                };
+
+                win.ShowDialog();
+            }
+            catch { }
+        }
 
         private TextBox CreateSelectableMessageTextBlock(string text, Thickness? margin = null)
         {
@@ -614,7 +661,7 @@ namespace ExcelChatAddin
             if (v == null) return "";
 
             // 単一セル（scalar）
-            if (!(v is object[,]))
+            if (!(v is object[,] ))
             {
                 return Convert.ToString(v) ?? "";
             }
@@ -661,6 +708,10 @@ namespace ExcelChatAddin
                 Margin = new Thickness(0, 0, 0, 6)
             };
 
+            var fullDisplayText = ReplaceRangeRefsForDisplay(text ?? "");
+            var isTruncated = CountLines(fullDisplayText) > MaxVisibleChatLines;
+            container.Tag = Tuple.Create(role ?? "", fullDisplayText ?? "");
+
             var grid = new Grid();
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -676,6 +727,23 @@ namespace ExcelChatAddin
             };
             DockPanel.SetDock(roleText, Dock.Left);
             headerPanel.Children.Add(roleText);
+
+            if (isTruncated)
+            {
+                var fullBtn = new Button
+                {
+                    Content = "全文",
+                    Width = 56,
+                    Height = 22,
+                    FontSize = 12,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(6, 0, 0, 0)
+                };
+                fullBtn.Click += (_, __) => ShowFullMessagePopup(role ?? "", fullDisplayText ?? "");
+                DockPanel.SetDock(fullBtn, Dock.Right);
+                headerPanel.Children.Add(fullBtn);
+            }
 
             var copyBtn = new Button
             {
@@ -723,7 +791,7 @@ namespace ExcelChatAddin
             grid.Children.Add(headerPanel);
             Grid.SetRow(headerPanel, 0);
 
-            var displayText = ReplaceRangeRefsForDisplay(text ?? "");
+            var displayText = isTruncated ? TakeFirstLines(fullDisplayText, MaxVisibleChatLines) : fullDisplayText;
 
             // JSONブロック検出を最優先（```json ... ``` を含む場合はBuildMessageBodyで処理）
             if (JsonBlockRegex.IsMatch(displayText ?? ""))
@@ -925,6 +993,14 @@ namespace ExcelChatAddin
                 {
                     var child = ChatHistoryPanel.Children[i] as Border;
                     if (child == null) continue;
+
+                    var tagged = child.Tag as Tuple<string, string>;
+                    if (tagged != null)
+                    {
+                        items.Add((tagged.Item1 + "\n" + tagged.Item2).Trim());
+                        continue;
+                    }
+
                     var grid = child.Child as Grid;
                     if (grid == null || grid.Children.Count < 2) continue;
                     var body = grid.Children[1] as TextBlock;
