@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Data.SqlTypes;
@@ -240,13 +240,29 @@ namespace ExcelChatAddin
             @"```(?:json)?[ \t]*\r?\n?(?<body>[\s\S]*?)```",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+        private TextBox CreateSelectableMessageTextBlock(string text, Thickness? margin = null)
+        {
+            return new TextBox
+            {
+                Text = text ?? "",
+                IsReadOnly = true,
+                TextWrapping = TextWrapping.Wrap,
+                Background = System.Windows.Media.Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(0),
+                Margin = margin ?? new Thickness(0),
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Disabled
+            };
+        }
+
         private StackPanel BuildMessageBody(string displayText)
         {
             var panel = new StackPanel { Orientation = Orientation.Vertical, Margin = new Thickness(0, 6, 0, 0) };
 
             if (string.IsNullOrEmpty(displayText))
             {
-                panel.Children.Add(new TextBlock { Text = "", TextWrapping = TextWrapping.Wrap });
+                panel.Children.Add(CreateSelectableMessageTextBlock(""));
                 return panel;
             }
 
@@ -257,7 +273,7 @@ namespace ExcelChatAddin
                 {
                     var before = displayText.Substring(pos, m.Index - pos).Trim();
                     if (!string.IsNullOrEmpty(before))
-                        panel.Children.Add(new TextBlock { Text = before, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4) });
+                        panel.Children.Add(CreateSelectableMessageTextBlock(before, new Thickness(0, 0, 0, 4)));
                 }
 
                 var jsonBody = m.Groups["body"].Value.TrimEnd();
@@ -299,11 +315,11 @@ namespace ExcelChatAddin
             {
                 var after = displayText.Substring(pos).Trim();
                 if (!string.IsNullOrEmpty(after))
-                    panel.Children.Add(new TextBlock { Text = after, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
+                    panel.Children.Add(CreateSelectableMessageTextBlock(after, new Thickness(0, 4, 0, 0)));
             }
 
             if (panel.Children.Count == 0)
-                panel.Children.Add(new TextBlock { Text = displayText, TextWrapping = TextWrapping.Wrap });
+                panel.Children.Add(CreateSelectableMessageTextBlock(displayText));
 
             return panel;
         }
@@ -815,7 +831,7 @@ namespace ExcelChatAddin
                                 var panel = new StackPanel { Orientation = Orientation.Vertical };
                                 if (!string.IsNullOrWhiteSpace(before))
                                 {
-                                    panel.Children.Add(new TextBlock { Text = before.Trim(), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 4) });
+                                    panel.Children.Add(CreateSelectableMessageTextBlock(before.Trim(), new Thickness(0, 0, 0, 4)));
                                 }
 
                                 var expander = CreateCollapsibleTable(rows);
@@ -823,7 +839,7 @@ namespace ExcelChatAddin
 
                                 if (!string.IsNullOrWhiteSpace(after))
                                 {
-                                    panel.Children.Add(new TextBlock { Text = after.Trim(), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
+                                    panel.Children.Add(CreateSelectableMessageTextBlock(after.Trim(), new Thickness(0, 4, 0, 0)));
                                 }
 
                                 // replace body with panel
@@ -2179,6 +2195,7 @@ namespace ExcelChatAddin
 
                     var keyColNormalized = NormalizeHeaderName(keyCol?.ColumnName ?? "");
 
+
                     foreach (var prop in fields.Properties())
                     {
                         var propName = NormalizeHeaderName(prop.Name);
@@ -2199,13 +2216,15 @@ namespace ExcelChatAddin
 
                         if (!isNew)
                         {
-                            // Textプロパティで書式適用済みの値（日付等）を取得
                             var cell = ws.Cells[targetRow, colIdx] as Excel.Range;
-                            oldValue = cell?.Text?.ToString() ?? Convert.ToString(cell?.Value2) ?? "";
+                            oldValue = GetCellDisplayValue(cell);
                         }
 
-                        // 値が同じならスキップ
-                        if (!isNew && string.Equals(oldValue.Trim(), newValue.Trim(), StringComparison.Ordinal))
+                        // 値が同じならスキップ（日付フォーマット正規化あり）
+                        if (!isNew && string.Equals(
+                                NormalizeForComparison(oldValue),
+                                NormalizeForComparison(newValue),
+                                StringComparison.OrdinalIgnoreCase))
                             continue;
 
                         // 追記モードの場合、プレビュー表示用の値を組み立て
@@ -2280,8 +2299,16 @@ namespace ExcelChatAddin
                         OriginalColor = cell.Interior.Color is int c ? c : 0
                     });
 
-                    // 値を書き込み
-                    cell.Value2 = e.NewValue;
+                    // 値を書き込み（改行含む場合は WrapText を有効化）
+                    if (e.NewValue.Contains("\n"))
+                    {
+                        cell.Value2 = e.NewValue;
+                        try { cell.WrapText = true; } catch { }
+                    }
+                    else
+                    {
+                        cell.Value2 = e.NewValue;
+                    }
 
                     // ハイライト適用
                     cell.Interior.Color = e.IsNewRow ? ColorInsertGreen : ColorUpdateYellow;
@@ -2295,8 +2322,81 @@ namespace ExcelChatAddin
         }
 
         /// <summary>
-        /// ハイライトされたセルの背景色を元に戻す。
+        /// 比較用に値を正規化する。日付文字列は yyyy/M/d 形式に統一する。
         /// </summary>
+        private static string NormalizeForComparison(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return value?.Trim() ?? "";
+            var trimmed = value.Trim();
+
+            DateTime dt;
+            // Invariant カルチャで試行（例: 2026/04/01, 2026-04-01）
+            if (DateTime.TryParse(trimmed, System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out dt))
+                return dt.ToString("yyyy/M/d");
+
+            // ja-JP カルチャで試行（例: 2026/4/1, 令和8年4月1日）
+            if (DateTime.TryParse(trimmed, new System.Globalization.CultureInfo("ja-JP"),
+                    System.Globalization.DateTimeStyles.None, out dt))
+                return dt.ToString("yyyy/M/d");
+
+            return trimmed;
+        }
+
+        /// <summary>
+        /// セルの表示値を取得する。日付シリアル値は yyyy/M/d 形式に変換する。
+        /// </summary>
+        private static string GetCellDisplayValue(Excel.Range cell)
+        {
+            if (cell == null) return "";
+
+            // Text プロパティで書式適用済みの値を取得する（列幅不足で "###" になる場合は除外）
+            try
+            {
+                var text = cell.Text?.ToString();
+                if (!string.IsNullOrWhiteSpace(text) && !text.StartsWith("#"))
+                    return text;
+            }
+            catch { }
+
+            // Value2 から変換（日付シリアル値を検出して日付文字列に変換）
+            try
+            {
+                var val2 = cell.Value2;
+                if (val2 == null) return "";
+
+                if (val2 is double d)
+                {
+                    // NumberFormat が日付書式かどうかチェック
+                    bool isDateFormat = false;
+                    try
+                    {
+                        var fmt = cell.NumberFormat?.ToString() ?? "";
+                        // "General" や純数値書式でなく、日付系の文字 (y/m/d) を含む場合
+                        isDateFormat = fmt.IndexOfAny(new[] { 'y', 'Y', 'd', 'D' }) >= 0
+                                       && !fmt.StartsWith("\"");
+                    }
+                    catch { }
+
+                    if (isDateFormat && d >= 1.0 && d < 2958466.0) // Excel 日付の有効範囲
+                    {
+                        try
+                        {
+                            return DateTime.FromOADate(d).ToString("yyyy/M/d");
+                        }
+                        catch { }
+                    }
+
+                    return Convert.ToString(d);
+                }
+
+                return Convert.ToString(val2) ?? "";
+            }
+            catch { }
+
+            return "";
+        }
+
         public void ClearHighlights()
         {
             if (_highlightRecords.Count == 0) return;

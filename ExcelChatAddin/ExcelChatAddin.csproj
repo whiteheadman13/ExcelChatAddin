@@ -225,6 +225,9 @@
     <Compile Include="RegisterDialog.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="SchemaTemplateEditDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="SchemaTemplateListDialog.cs">
       <SubType>Form</SubType>
     </Compile>

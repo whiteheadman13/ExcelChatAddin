@@ -124,6 +124,13 @@ namespace ExcelChatAddin
                 Height = 30,
                 Location = new Point(142, 10)
             };
+            var btnExportDefinitions = new Button
+            {
+                Text = "定義をExcel出力",
+                Width = 130,
+                Height = 30,
+                Location = new Point(282, 10)
+            };
             var btnSave = new Button
             {
                 Text = "保存",
@@ -153,9 +160,11 @@ namespace ExcelChatAddin
             btnClose.Click += (s, e) => Close();
             btnTemplateSave.Click += BtnTemplateSave_Click;
             btnTemplateLoad.Click += BtnTemplateLoad_Click;
+            btnExportDefinitions.Click += BtnExportDefinitions_Click;
 
             bottom.Controls.Add(btnTemplateSave);
             bottom.Controls.Add(btnTemplateLoad);
+            bottom.Controls.Add(btnExportDefinitions);
             bottom.Controls.Add(btnSave);
             bottom.Controls.Add(btnDelete);
             bottom.Controls.Add(btnClose);
@@ -772,6 +781,133 @@ namespace ExcelChatAddin
             {
                 MessageBox.Show("テンプレートからの挿入に失敗しました: " + ex.Message);
             }
+        }
+
+        private void BtnExportDefinitions_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                _store = IssueSchemaManager.LoadStore();
+                var tables = _store?.Tables?.Where(x => x != null).ToList() ?? new List<IssueSchemaConfig>();
+                if (tables.Count == 0)
+                {
+                    MessageBox.Show("保存済みの表定義がありません。", "表定義出力");
+                    return;
+                }
+
+                var wb = _excelApp?.ActiveWorkbook;
+                if (wb == null)
+                {
+                    MessageBox.Show("ブックが開かれていません。", "表定義出力");
+                    return;
+                }
+
+                var ws = wb.Worksheets.Add() as Excel.Worksheet;
+                if (ws == null) return;
+
+                string sheetName = "表定義一覧";
+                try
+                {
+                    bool exists = false;
+                    foreach (Excel.Worksheet s in wb.Worksheets)
+                    {
+                        if (string.Equals(s.Name, sheetName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            exists = true;
+                            break;
+                        }
+                    }
+                    if (exists)
+                        sheetName = sheetName + "_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+
+                    ws.Name = sheetName;
+                }
+                catch { }
+
+                string[] headers =
+                {
+                    "テーブル名", "シート名", "ヘッダー行", "データ開始行", "キー列",
+                    "列レター", "列名", "型", "キー", "必須", "値候補", "例", "意味", "更新モード"
+                };
+
+                for (int c = 0; c < headers.Length; c++)
+                {
+                    var cell = ws.Cells[1, c + 1] as Excel.Range;
+                    if (cell == null) continue;
+                    cell.Value2 = headers[c];
+                    cell.Font.Bold = true;
+                }
+
+                int row = 2;
+                foreach (var table in tables)
+                {
+                    var columns = table.Columns ?? new List<IssueSchemaColumn>();
+                    if (columns.Count == 0)
+                    {
+                        WriteTableDefinitionRow(ws, row, table, null);
+                        row++;
+                        continue;
+                    }
+
+                    foreach (var col in columns)
+                    {
+                        WriteTableDefinitionRow(ws, row, table, col);
+                        row++;
+                    }
+                }
+
+                try
+                {
+                    int lastRow = Math.Max(2, row - 1);
+                    var topLeft = ws.Cells[1, 1] as Excel.Range;
+                    var bottomRight = ws.Cells[lastRow, headers.Length] as Excel.Range;
+                    var tableRange = ws.Range[topLeft, bottomRight];
+
+                    var lo = ws.ListObjects.Add(
+                        Excel.XlListObjectSourceType.xlSrcRange,
+                        tableRange,
+                        Type.Missing,
+                        Excel.XlYesNoGuess.xlYes,
+                        Type.Missing);
+
+                    if (lo != null)
+                    {
+                        try { lo.Name = "表定義一覧"; } catch { }
+                    }
+                }
+                catch { }
+
+                try { ws.Columns.AutoFit(); } catch { }
+
+                MessageBox.Show($"表定義を「{sheetName}」シートに出力しました。\n({tables.Count} テーブル)", "表定義出力");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("表定義の出力に失敗しました: " + ex.Message, "表定義出力");
+            }
+        }
+
+        private static void WriteTableDefinitionRow(Excel.Worksheet ws, int row, IssueSchemaConfig table, IssueSchemaColumn col)
+        {
+            ws.Cells[row, 1].Value2 = table.TableName ?? "";
+            ws.Cells[row, 2].Value2 = table.SheetName ?? "";
+            ws.Cells[row, 3].Value2 = table.HeaderRow;
+            ws.Cells[row, 4].Value2 = table.DataStartRow;
+            ws.Cells[row, 5].Value2 = table.KeyColumnLetter ?? "";
+
+            if (col == null) return;
+
+            ws.Cells[row, 6].Value2 = col.ColumnLetter ?? "";
+            ws.Cells[row, 7].Value2 = col.ColumnName ?? "";
+            ws.Cells[row, 8].Value2 = col.ValueType ?? "";
+            ws.Cells[row, 9].Value2 = col.IsKey ? "○" : "";
+            ws.Cells[row, 10].Value2 = col.IsRequired ? "○" : "";
+            ws.Cells[row, 11].Value2 = col.AllowedValues != null && col.AllowedValues.Count > 0
+                ? string.Join(", ", col.AllowedValues)
+                : "";
+            ws.Cells[row, 12].Value2 = col.ExampleValue ?? "";
+            ws.Cells[row, 13].Value2 = col.Meaning ?? "";
+            ws.Cells[row, 14].Value2 = col.UpdateMode ?? "overwrite";
         }
 
         private bool ExcelTableExists(string tableName)

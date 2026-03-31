@@ -19,9 +19,9 @@ namespace ExcelChatAddin
 
         public SchemaTemplateEntry SelectedTemplate { get; private set; }
 
-        public SchemaTemplateListDialog()
+        public SchemaTemplateListDialog(bool manageOnly = false)
         {
-            Text = "表スキーマテンプレート一覧";
+            Text = manageOnly ? "表スキーマテンプレート管理" : "表スキーマテンプレート一覧";
             Size = new Size(700, 500);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
@@ -30,7 +30,7 @@ namespace ExcelChatAddin
 
             _lst = new ListBox { Location = new Point(12, 12), Size = new Size(300, 390) };
             _lst.SelectedIndexChanged += (s, e) => ShowPreview();
-            _lst.DoubleClick += (s, e) => SelectCurrent();
+            _lst.DoubleClick += (s, e) => { if (!manageOnly) SelectCurrent(); };
 
             _txtPreview = new TextBox
             {
@@ -42,13 +42,13 @@ namespace ExcelChatAddin
                 Font = new Font("MS Gothic", 9)
             };
 
-            _btnSelect = new Button { Text = "選択して挿入", Location = new Point(12, 420), Size = new Size(120, 28) };
+            _btnSelect = new Button { Text = "選択して挿入", Location = new Point(12, 420), Size = new Size(120, 28), Visible = !manageOnly };
             _btnSelect.Click += (s, e) => SelectCurrent();
 
-            _btnEdit = new Button { Text = "編集", Location = new Point(150, 420), Size = new Size(80, 28) };
+            _btnEdit = new Button { Text = "編集", Location = new Point(manageOnly ? 12 : 150, 420), Size = new Size(80, 28) };
             _btnEdit.Click += (s, e) => EditCurrent();
 
-            _btnDelete = new Button { Text = "削除", Location = new Point(248, 420), Size = new Size(80, 28), ForeColor = Color.Red };
+            _btnDelete = new Button { Text = "削除", Location = new Point(manageOnly ? 110 : 248, 420), Size = new Size(80, 28), ForeColor = Color.Red };
             _btnDelete.Click += (s, e) => DeleteCurrent();
 
             _btnClose = new Button { Text = "閉じる", Location = new Point(590, 420), Size = new Size(80, 28), DialogResult = DialogResult.Cancel };
@@ -126,17 +126,15 @@ namespace ExcelChatAddin
         {
             if (_lst.SelectedIndex < 0 || _lst.SelectedIndex >= _items.Count) return;
             var cur = _items[_lst.SelectedIndex];
-            using (var dlg = new SchemaTemplateSaveDialog(cur.Name, cur.Description))
+            using (var dlg = new SchemaTemplateEditDialog(cur))
             {
-                dlg.Text = "テンプレート編集";
-                if (dlg.ShowDialog(this) != DialogResult.OK) return;
-                if (string.IsNullOrWhiteSpace(dlg.TemplateName))
-                {
-                    MessageBox.Show("テンプレート名を入力してください。", "入力エラー");
-                    return;
-                }
+                if (dlg.ShowDialog(this) != DialogResult.OK || !dlg.Confirmed) return;
+
                 cur.Name = dlg.TemplateName;
                 cur.Description = dlg.TemplateDescription;
+                cur.HeaderRow = dlg.HeaderRow;
+                cur.DataStartRow = dlg.DataStartRow;
+                cur.Columns = dlg.ResultColumns;
                 SchemaTemplateManager.SaveAll(_items);
                 LoadItems();
             }

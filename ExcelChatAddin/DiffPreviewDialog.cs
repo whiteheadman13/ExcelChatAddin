@@ -64,6 +64,17 @@ namespace ExcelChatAddin
                     _grid.CommitEdit(DataGridViewDataErrorContexts.Commit);
             };
             _grid.CellFormatting += Grid_CellFormatting;
+            _grid.CellDoubleClick += Grid_CellDoubleClick;
+
+            var lblHint = new Label
+            {
+                Text = "※ 行をダブルクリックすると変更前後を詳細比較できます",
+                Dock = DockStyle.Bottom,
+                Height = 20,
+                ForeColor = Color.Gray,
+                Font = new Font(DefaultFont.FontFamily, 8f),
+                Padding = new Padding(8, 2, 0, 0)
+            };
 
             var bottom = new Panel { Dock = DockStyle.Bottom, Height = 52 };
             var btnSelectAll = new Button { Text = "全選択", Width = 80, Height = 30, Location = new Point(10, 10) };
@@ -86,6 +97,7 @@ namespace ExcelChatAddin
             bottom.Controls.AddRange(new Control[] { btnSelectAll, btnDeselectAll, btnApply, btnCancel });
             Controls.Add(_grid);
             Controls.Add(lblHeader);
+            Controls.Add(lblHint);
             Controls.Add(bottom);
         }
 
@@ -135,6 +147,16 @@ namespace ExcelChatAddin
             Confirmed = true;
             Close();
         }
+
+        private void Grid_CellDoubleClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.RowIndex >= _entries.Count) return;
+            var entry = _entries[e.RowIndex];
+            using (var popup = new DiffDetailPopup(entry))
+            {
+                popup.ShowDialog(this);
+            }
+        }
     }
 
     /// <summary>差分1件分のデータ。</summary>
@@ -160,5 +182,166 @@ namespace ExcelChatAddin
         public int Col { get; set; }
         public double OriginalColorIndex { get; set; }
         public int OriginalColor { get; set; }
+    }
+
+    /// <summary>差分の変更前・変更後を横並びで比較するポップアップ。</summary>
+    public class DiffDetailPopup : Form
+    {
+        public DiffDetailPopup(DiffEntry entry)
+        {
+            Text = string.Format("差分詳細 — {0} / {1}", entry.KeyValue, entry.FieldName);
+            Size = new Size(900, 520);
+            MinimumSize = new Size(600, 360);
+            StartPosition = FormStartPosition.CenterParent;
+            FormBorderStyle = FormBorderStyle.Sizable;
+
+            // ヘッダー
+            var lblHeader = new Label
+            {
+                Text = string.Format("キー: {0}　 項目名: {1}", entry.KeyValue, entry.FieldName),
+                Dock = DockStyle.Top,
+                Height = 28,
+                Font = new Font(DefaultFont.FontFamily, 10f, FontStyle.Bold),
+                Padding = new Padding(8, 6, 0, 0)
+            };
+
+            // 左パネル（変更前）
+            var pnlOld = new Panel { Dock = DockStyle.Fill };
+            var lblOld = new Label
+            {
+                Text = "変更前",
+                Dock = DockStyle.Top,
+                Height = 24,
+                Font = new Font(DefaultFont.FontFamily, 9f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(180, 40, 40),
+                Padding = new Padding(4, 4, 0, 0)
+            };
+            var txtOld = new RichTextBox
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                BackColor = Color.FromArgb(255, 245, 245),
+                Font = new Font("MS Gothic", 9.5f),
+                BorderStyle = BorderStyle.FixedSingle,
+                ScrollBars = RichTextBoxScrollBars.Vertical,
+                WordWrap = true
+            };
+            RenderDiffText(txtOld, entry.OldValue, entry.NewValue, isOld: true);
+            pnlOld.Controls.Add(txtOld);
+            pnlOld.Controls.Add(lblOld);
+
+            // 右パネル（変更後）
+            var pnlNew = new Panel { Dock = DockStyle.Fill };
+            var lblNew = new Label
+            {
+                Text = "変更後",
+                Dock = DockStyle.Top,
+                Height = 24,
+                Font = new Font(DefaultFont.FontFamily, 9f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(30, 130, 60),
+                Padding = new Padding(4, 4, 0, 0)
+            };
+            var txtNew = new RichTextBox
+            {
+                Dock = DockStyle.Fill,
+                ReadOnly = true,
+                BackColor = Color.FromArgb(240, 255, 245),
+                Font = new Font("MS Gothic", 9.5f),
+                BorderStyle = BorderStyle.FixedSingle,
+                ScrollBars = RichTextBoxScrollBars.Vertical,
+                WordWrap = true
+            };
+            RenderDiffText(txtNew, entry.NewValue, entry.OldValue, isOld: false);
+            pnlNew.Controls.Add(txtNew);
+            pnlNew.Controls.Add(lblNew);
+
+            // 左右 SplitContainer
+            var split = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Vertical,
+                Panel1MinSize = 100,
+                Panel2MinSize = 100
+            };
+            split.Panel1.Controls.Add(pnlOld);
+            split.Panel2.Controls.Add(pnlNew);
+
+            // 下部ボタン
+            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 46 };
+            var btnClose = new Button
+            {
+                Text = "閉じる",
+                Width = 100,
+                Height = 30,
+                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
+                DialogResult = DialogResult.Cancel
+            };
+            bottom.Controls.Add(btnClose);
+            CancelButton = btnClose;
+
+            Controls.Add(split);
+            Controls.Add(lblHeader);
+            Controls.Add(bottom);
+
+            // SplitterDistance はレイアウト完了後に安全に設定
+            Load += (s, ev) =>
+            {
+                try
+                {
+                    int halfWidth = split.ClientSize.Width / 2;
+                    if (halfWidth > split.Panel1MinSize && halfWidth > split.Panel2MinSize)
+                        split.SplitterDistance = halfWidth;
+                }
+                catch { }
+
+                // 閉じるボタンの位置をパネル右端に合わせる
+                btnClose.Location = new Point(bottom.ClientSize.Width - btnClose.Width - 10, 8);
+            };
+        }
+
+        /// <summary>
+        /// テキストをライン単位で差分ハイライトしながら RichTextBox に描画する。
+        /// 相手テキストと異なる行を強調色で塗る。
+        /// </summary>
+        private static void RenderDiffText(RichTextBox rtb, string mine, string other, bool isOld)
+        {
+            rtb.Clear();
+            if (string.IsNullOrEmpty(mine))
+            {
+                rtb.SelectAll();
+                rtb.SelectedText = "";
+                return;
+            }
+
+            var myLines = mine.Split('\n');
+            var otherLines = new HashSet<string>(
+                (other ?? "").Split('\n').Select(l => l.TrimEnd('\r')),
+                StringComparer.Ordinal);
+
+            // 変更行ハイライト色
+            var highlightBg = isOld
+                ? Color.FromArgb(245, 228, 245)   // 削除行: 薄ピンク
+                : Color.FromArgb(241, 245, 228);  // 追加行: 薄緑
+
+            for (int i = 0; i < myLines.Length; i++)
+            {
+                var line = myLines[i].TrimEnd('\r');
+                bool isDiff = !otherLines.Contains(line);
+
+                int start = rtb.TextLength;
+                rtb.AppendText(line);
+                if (i < myLines.Length - 1) rtb.AppendText("\n");
+                int end = rtb.TextLength;
+
+                if (isDiff)
+                {
+                    rtb.Select(start, end - start);
+                    rtb.SelectionBackColor = highlightBg;
+                }
+            }
+
+            rtb.SelectionStart = 0;
+            rtb.ScrollToCaret();
+        }
     }
 }

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows.Forms;
 using Excel = Microsoft.Office.Interop.Excel;
 using Office = Microsoft.Office.Core;
@@ -602,6 +603,189 @@ namespace ExcelChatAddin
         {
             // 既存呼び出し互換
             ShowTableSchemaSettings();
+        }
+
+        public void ShowSchemaTemplateInsert()
+        {
+            try
+            {
+                var items = SchemaTemplateManager.LoadAll();
+                if (items.Count == 0)
+                {
+                    MessageBox.Show("保存済みのテンプレートがありません。", "テンプレートから挿入");
+                    return;
+                }
+
+                var owner = new Win32Window(new IntPtr(this.Application.Hwnd));
+
+                SchemaTemplateEntry tmpl;
+                using (var dlg = new SchemaTemplateListDialog())
+                {
+                    if (dlg.ShowDialog(owner) != DialogResult.OK || dlg.SelectedTemplate == null) return;
+                    tmpl = dlg.SelectedTemplate;
+                }
+
+                string newTableName;
+                using (var nameDlg = new SchemaTemplateTableNameDialog(tmpl.Name))
+                {
+                    if (nameDlg.ShowDialog(owner) != DialogResult.OK) return;
+                    newTableName = nameDlg.TableName;
+                }
+
+                if (string.IsNullOrWhiteSpace(newTableName))
+                {
+                    MessageBox.Show("テーブル名を入力してください。", "入力エラー");
+                    return;
+                }
+
+                if (ExcelTableExists(newTableName))
+                {
+                    MessageBox.Show($"テーブル「{newTableName}」は既にExcelブック内に存在します。\n別のテーブル名を指定してください。",
+                        "テーブル名重複", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                var cols = (tmpl.Columns ?? new List<IssueSchemaColumn>())
+                    .Select(c => new IssueSchemaColumn
+                    {
+                        ColumnLetter = c.ColumnLetter,
+                        ColumnName = c.ColumnName,
+                        IsKey = c.IsKey,
+                        IsRequired = c.IsRequired,
+                        ValueType = c.ValueType,
+                        AllowedValues = c.AllowedValues != null ? new List<string>(c.AllowedValues) : new List<string>(),
+                        ExampleValue = c.ExampleValue,
+                        Meaning = c.Meaning,
+                        UpdateMode = c.UpdateMode
+                    })
+                    .ToList();
+
+                if (cols.Count == 0)
+                {
+                    MessageBox.Show("テンプレートに列定義がありません。", "テンプレートから挿入");
+                    return;
+                }
+
+                var keyCols = cols.Where(x => x.IsKey).ToList();
+                var cfg = new IssueSchemaConfig
+                {
+                    TableName = newTableName,
+                    SheetName = newTableName,
+                    HeaderRow = Math.Max(1, tmpl.HeaderRow),
+                    DataStartRow = Math.Max(2, tmpl.DataStartRow),
+                    ValuePolicy = "strict",
+                    KeyColumnLetter = keyCols.Count > 0 ? keyCols[0].ColumnLetter : cols[0].ColumnLetter,
+                    Columns = cols
+                };
+
+                var store = IssueSchemaManager.LoadStore();
+                IssueSchemaManager.Upsert(store, cfg);
+                IssueSchemaManager.SaveStore(store);
+
+                CreateNewSheetWithTable(cfg);
+
+                MessageBox.Show($"テンプレート「{tmpl.Name}」から新しいテーブル「{newTableName}」を作成しました。",
+                    "テンプレートから挿入");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("テンプレートからの挿入に失敗しました: " + ex.Message, "テンプレートから挿入");
+            }
+        }
+
+        public void ShowSchemaTemplateManager()
+        {
+            try
+            {
+                var owner = new Win32Window(new IntPtr(this.Application.Hwnd));
+                using (var dlg = new SchemaTemplateListDialog(manageOnly: true))
+                {
+                    dlg.ShowDialog(owner);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "テンプレート管理");
+            }
+        }
+
+        private bool ExcelTableExists(string tableName)
+        {
+            try
+            {
+                var wb = this.Application?.ActiveWorkbook;
+                if (wb == null) return false;
+
+                foreach (Excel.Worksheet ws in wb.Worksheets)
+                {
+                    if (ws.ListObjects == null) continue;
+                    foreach (Excel.ListObject lo in ws.ListObjects)
+                    {
+                        if (string.Equals(lo.Name, tableName, StringComparison.OrdinalIgnoreCase))
+                            return true;
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        private void CreateNewSheetWithTable(IssueSchemaConfig cfg)
+        {
+            if (cfg == null || cfg.Columns == null || cfg.Columns.Count == 0) return;
+
+            var wb = this.Application?.ActiveWorkbook;
+            if (wb == null) return;
+
+            var ws = wb.Worksheets.Add() as Excel.Worksheet;
+            if (ws == null) return;
+            try { ws.Name = cfg.TableName; } catch { }
+
+            foreach (var c in cfg.Columns)
+            {
+                int col = ColumnLetterToIndex(c.ColumnLetter);
+                if (col <= 0) continue;
+                var headerCell = ws.Cells[cfg.HeaderRow, col] as Excel.Range;
+                if (headerCell != null) headerCell.Value2 = c.ColumnName;
+            }
+
+            int minCol = cfg.Columns.Min(c => ColumnLetterToIndex(c.ColumnLetter));
+            int maxCol = cfg.Columns.Max(c => ColumnLetterToIndex(c.ColumnLetter));
+            if (minCol <= 0 || maxCol <= 0) return;
+
+            int endRow = Math.Max(cfg.DataStartRow, cfg.HeaderRow + 1);
+            var topLeft = ws.Cells[cfg.HeaderRow, minCol] as Excel.Range;
+            var bottomRight = ws.Cells[endRow, maxCol] as Excel.Range;
+            var tableRange = ws.Range[topLeft, bottomRight];
+            if (tableRange == null) return;
+
+            try
+            {
+                var lo = ws.ListObjects.Add(
+                    Excel.XlListObjectSourceType.xlSrcRange,
+                    tableRange,
+                    Type.Missing,
+                    Excel.XlYesNoGuess.xlYes,
+                    Type.Missing);
+
+                if (lo != null)
+                {
+                    try { lo.Name = cfg.TableName; } catch { }
+                }
+            }
+            catch { }
+        }
+
+        private static int ColumnLetterToIndex(string letter)
+        {
+            if (string.IsNullOrWhiteSpace(letter)) return 0;
+            int index = 0;
+            foreach (var ch in letter.Trim().ToUpperInvariant())
+            {
+                if (ch < 'A' || ch > 'Z') return 0;
+                index = index * 26 + (ch - 'A' + 1);
+            }
+            return index;
         }
 
 
