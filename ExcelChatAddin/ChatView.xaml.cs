@@ -4,6 +4,7 @@ using System.Linq;
 using System.Data.SqlTypes;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -594,7 +595,7 @@ namespace ExcelChatAddin
                 // 送信済みの range マップは継続する（セッション内）。
                 // 今回は payload 自体は既に BuildMaskedPayload 内でマスク済みなので再度 Mask は不要,
                 // ただし保険として再マスクしておく。
-                
+
                 var client = new GeminiClient();
                 DebugLogger.LogInfo("Sending to Gemini...");
                 var response = await client.SendAsync(masked, _selectedModel);
@@ -610,6 +611,18 @@ namespace ExcelChatAddin
                     RemoveLastSystemIndicator();
 
                     AppendChat("Gemini", unmaskedResponse, raw);
+                });
+
+                // ★ 更新対象テーブル選択時: 検証→修正ループ（最大3回）
+                var validatedJson = await RunValidationLoopAsync(client, raw, unmaskedResponse);
+                if (validatedJson != null)
+                {
+                    // 最終JSONで上書き（反映時にこちらが使われる）
+                    _lastGeminiResponse = validatedJson;
+                }
+
+                Dispatcher.Invoke(() =>
+                {
                     btnSendGemini.IsEnabled = true;
                 });
             }
@@ -640,6 +653,212 @@ namespace ExcelChatAddin
                     ChatHistoryPanel.Children.RemoveAt(ChatHistoryPanel.Children.Count - 1);
             }
             catch { }
+        }
+
+        /// <summary>
+        /// 更新対象テーブル選択時に、生成済みJSONを検証→修正するループを実行する。
+        /// 未選択時は null を返す（呼び出し側は従来フローを維持）。
+        /// </summary>
+        private async Task<string> RunValidationLoopAsync(GeminiClient client, string rawUserInput, string firstResponse)
+        {
+            // 更新対象テーブル未選択なら何もしない
+            if (string.IsNullOrWhiteSpace(_selectedUpdateTable)) return null;
+
+            // 1回目のJSONをパースできなければバリデーション不要
+            IssueSchemaConfig schema = null;
+            try
+            {
+                var store = IssueSchemaManager.LoadStore();
+                schema = IssueSchemaManager.FindByTableName(store, _selectedUpdateTable);
+            }
+            catch { }
+            if (schema == null || schema.Columns == null || schema.Columns.Count == 0) return null;
+
+            if (!TryParseJsonOperations(firstResponse, schema, out var ops, out _) || ops == null || ops.Count == 0)
+                return null;
+
+            // 既存テーブルデータを取得（マスク適用）
+            var existingData = GetExistingTableDataTsv(schema);
+
+            // 現在のoperations JSONを文字列化
+            var currentJson = BuildOperationsJsonString(ops);
+
+            Dispatcher.Invoke(() =>
+            {
+                AppendChat("System", $"🔄 定義準拠バリデーション開始（対象: {_selectedUpdateTable}、最大{ContentValidator.MaxIterations}回）");
+            });
+
+            ContentValidator.LoopResult loopResult = new ContentValidator.LoopResult();
+            loopResult.FinalJson = currentJson;
+
+            for (int i = 1; i <= ContentValidator.MaxIterations; i++)
+            {
+                try
+                {
+                    Dispatcher.Invoke(() =>
+                    {
+                        AppendChat("System", $"⏳ 検証 {i}/{ContentValidator.MaxIterations} 実行中...");
+                    });
+
+                    // 検証プロンプト構築
+                    var prompt = ContentValidator.BuildValidationPrompt(
+                        rawUserInput, currentJson, schema, existingData);
+
+                    var maskedPrompt = MaskingEngine.Instance.Mask(prompt);
+
+                    // LLM呼び出し
+                    var validationResponse = await client.SendAsync(maskedPrompt, _selectedModel);
+                    var unmaskedValidation = MaskingEngine.Instance.Unmask(validationResponse);
+
+                    // パース
+                    var result = ContentValidator.ParseValidationResponse(unmaskedValidation);
+
+                    var log = new ContentValidator.IterationLog
+                    {
+                        Iteration = i,
+                        ErrorCount = result.ErrorCount,
+                        WarningCount = result.WarningCount,
+                        Revised = result.Findings.Count > 0 && !string.IsNullOrWhiteSpace(result.RevisedJson)
+                    };
+                    loopResult.Logs.Add(log);
+                    loopResult.IterationsRun = i;
+
+                    // 経過表示
+                    var statusMsg = ContentValidator.FormatIterationStatus(
+                        i, ContentValidator.MaxIterations, result.ErrorCount, result.WarningCount, log.Revised);
+                    Dispatcher.Invoke(() =>
+                    {
+                        RemoveLastSystemIndicator();
+                        AppendChat("System", statusMsg);
+                    });
+
+                    // 指摘0件 → 終了
+                    if (result.TotalCount == 0)
+                    {
+                        // 修正なしでもrevisedOperationsがあればそちらを採用
+                        if (!string.IsNullOrWhiteSpace(result.RevisedJson))
+                            currentJson = result.RevisedJson;
+                        loopResult.FinalJson = currentJson;
+                        break;
+                    }
+
+                    // 修正版があれば次のイテレーション用に更新
+                    if (!string.IsNullOrWhiteSpace(result.RevisedJson))
+                    {
+                        currentJson = result.RevisedJson;
+                    }
+                    loopResult.FinalJson = currentJson;
+
+                    // 最終反復なら残存指摘を記録
+                    if (i == ContentValidator.MaxIterations)
+                    {
+                        loopResult.RemainingFindings = result.Findings;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugLogger.LogException(ex, $"RunValidationLoopAsync iteration {i}");
+                    Dispatcher.Invoke(() =>
+                    {
+                        RemoveLastSystemIndicator();
+                        AppendChat("System", $"⚠ 検証 {i}/{ContentValidator.MaxIterations} でエラー: {ex.Message}");
+                    });
+                    break;
+                }
+            }
+
+            // 最終結果をチャット欄に表示
+            var finalJson = loopResult.FinalJson;
+            Dispatcher.Invoke(() =>
+            {
+                AppendChat("Validator", finalJson, rawUserInput);
+
+                // 未解消指摘があれば履歴に反映
+                if (loopResult.RemainingFindings != null && loopResult.RemainingFindings.Count > 0)
+                {
+                    var findingsText = $"⚠ 検証完了（{loopResult.IterationsRun}回実施）— 未解消の指摘 {loopResult.RemainingFindings.Count}件:\n"
+                        + ContentValidator.FormatFindings(loopResult.RemainingFindings);
+                    AppendChat("System", findingsText);
+                }
+                else
+                {
+                    AppendChat("System", $"✅ 検証完了（{loopResult.IterationsRun}回実施）— 全ての指摘が解消されました。");
+                }
+            });
+
+            return finalJson;
+        }
+
+        /// <summary>
+        /// 更新対象テーブルの既存データをTSV形式で取得する。
+        /// </summary>
+        private string GetExistingTableDataTsv(IssueSchemaConfig schema)
+        {
+            try
+            {
+                var app = Globals.ThisAddIn?.Application;
+                if (app?.ActiveWorkbook == null) return "";
+
+                Excel.Worksheet ws;
+                Excel.ListObject lo;
+                if (!TryFindTableByName(app.ActiveWorkbook, schema.TableName, out ws, out lo)) return "";
+
+                var dataRange = lo.DataBodyRange;
+                if (dataRange == null) return "";
+
+                // ヘッダー + データをTSVとして構築
+                var sb = new StringBuilder();
+                var header = lo.HeaderRowRange;
+                if (header != null)
+                {
+                    var hVals = header.Value2;
+                    if (hVals is object[,] hArr)
+                    {
+                        for (int c = 1; c <= hArr.GetLength(1); c++)
+                        {
+                            if (c > 1) sb.Append('\t');
+                            sb.Append(hArr[1, c]?.ToString() ?? "");
+                        }
+                        sb.AppendLine();
+                    }
+                }
+
+                var vals = dataRange.Value2;
+                if (vals is object[,] arr)
+                {
+                    // 既存データは最大50行まで（トークン節約）
+                    int maxRows = Math.Min(arr.GetLength(0), 50);
+                    for (int r = 1; r <= maxRows; r++)
+                    {
+                        for (int c = 1; c <= arr.GetLength(1); c++)
+                        {
+                            if (c > 1) sb.Append('\t');
+                            sb.Append(arr[r, c]?.ToString() ?? "");
+                        }
+                        sb.AppendLine();
+                    }
+                }
+
+                return MaskingEngine.Instance.Mask(sb.ToString());
+            }
+            catch (Exception ex)
+            {
+                DebugLogger.LogException(ex, "GetExistingTableDataTsv");
+                return "";
+            }
+        }
+
+        /// <summary>
+        /// JObject の operations リストをJSON文字列に変換する。
+        /// </summary>
+        private static string BuildOperationsJsonString(List<JObject> operations)
+        {
+            var wrapper = new JObject
+            {
+                ["operations"] = new JArray(operations),
+                ["errors"] = new JArray()
+            };
+            return wrapper.ToString(Newtonsoft.Json.Formatting.Indented);
         }
 
 
@@ -768,7 +987,8 @@ namespace ExcelChatAddin
             DockPanel.SetDock(copyBtn, Dock.Right);
             headerPanel.Children.Add(copyBtn);
 
-            if (string.Equals(role, "Gemini", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(role, "Gemini", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Validator", StringComparison.OrdinalIgnoreCase))
             {
                 var applyBtn = new Button
                 {
@@ -1997,7 +2217,17 @@ namespace ExcelChatAddin
 
                 // JSON operations 形式を優先
                 IssueSchemaConfig schema = null;
-                try { schema = IssueSchemaManager.LoadOrCreate(app); } catch { }
+                try
+                {
+                    // 更新対象テーブルが選択されていればそのスキーマを優先取得
+                    if (!string.IsNullOrWhiteSpace(_selectedUpdateTable))
+                    {
+                        var store = IssueSchemaManager.LoadStore();
+                        schema = IssueSchemaManager.FindByTableName(store, _selectedUpdateTable);
+                    }
+                    if (schema == null) schema = IssueSchemaManager.LoadOrCreate(app);
+                }
+                catch { }
 
                 if (TryParseJsonOperations(responseText, schema, out var ops, out var errors))
                 {

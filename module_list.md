@@ -349,3 +349,22 @@
   5. `SchemaTemplateTableNameDialog.cs` を新規作成（テンプレート挿入時のテーブル名入力ダイアログ）
   6. `SchemaTemplateEditDialog.cs` を新規作成（テンプレートのフル編集ダイアログ: 名前・説明・行設定・列定義グリッド・ColumnDetailDialog連携）
   7. `IssueSchemaSettingsDialog.cs` にボタン2つ追加（テンプレート保存 / テンプレートから挿入）
+
+## Session Update (定義準拠バリデーション付きJSON生成)
+- 事象: 更新対象テーブル選択時、LLMが生成した更新案（operations JSON）の内容精度が低い。
+  - 必須以外の項目を入力内容から読み取れるのに埋めない
+  - テーブル定義の制約（AllowedValues等）に沿わない値を設定する
+  - 既存テーブルデータとの関係性（重複・整合性）を考慮しない
+- 修正内容:
+  1. `_selectedUpdateTable` 選択時のみ、1回目生成後に検証→修正ループを実行（最大3回）
+  2. 検証の観点: 更新対象テーブル定義（Columns[].Meaning/AllowedValues/ExampleValue/IsRequired）＋既存テーブルデータとの関係性
+  3. 検証プロンプト構築ヘルパー `BuildValidationPrompt` を追加
+  4. 指摘フォーマットを定型化（key + column + severity + message + suggestedValue + rule）
+  5. 各ループの経過状況（検証 i/3、指摘件数、修正有無）をチャット欄に `[System]` で表示
+  6. 最終JSONを `[Validator]` ロールでチャット欄に表示（反映ボタン付き）
+  7. 最終的に残った指摘をチャット履歴欄に反映表示
+  8. 反映処理は最終JSONを優先利用（`_lastGeminiResponse` を上書き）
+  9. 更新対象テーブル未選択時は従来フロー（単発生成）を維持
+- 対象モジュール:
+  - `ExcelChatAddin/ChatView.xaml.cs`
+  - `ExcelChatAddin/ContentValidator.cs`（新規）
