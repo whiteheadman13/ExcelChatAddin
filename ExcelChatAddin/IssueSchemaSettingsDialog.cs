@@ -16,6 +16,7 @@ namespace ExcelChatAddin
         private ComboBox _cmbTableName;
         private NumericUpDown _numHeaderRow;
         private NumericUpDown _numDataStartRow;
+        private TextBox _txtSplittingPolicy;
         private DataGridView _grid;
 
         public IssueSchemaSettingsDialog(Excel.Application app)
@@ -30,7 +31,7 @@ namespace ExcelChatAddin
         private void InitializeLayout()
         {
             Text = "表スキーマ設定";
-            Size = new Size(1100, 620);
+            Size = new Size(1100, 760);
             StartPosition = FormStartPosition.CenterParent;
 
             var top = new Panel { Dock = DockStyle.Top, Height = 88 };
@@ -79,6 +80,25 @@ namespace ExcelChatAddin
                 AllowUserToDeleteRows = true,
                 SelectionMode = DataGridViewSelectionMode.FullRowSelect
             };
+
+            // --- 分割ポリシー パネル ---
+            var splittingPanel = new GroupBox
+            {
+                Text = "行の分割基準（1つの入力を複数行に分解する際のルール。空欄なら分割指示なし）",
+                Dock = DockStyle.Top,
+                Height = 120,
+                Padding = new Padding(8, 4, 8, 4)
+            };
+            _txtSplittingPolicy = new TextBox
+            {
+                Multiline = true,
+                ScrollBars = ScrollBars.Vertical,
+                Dock = DockStyle.Fill,
+                AcceptsReturn = true,
+                WordWrap = true,
+                Font = new Font("Yu Gothic UI", 9f)
+            };
+            splittingPanel.Controls.Add(_txtSplittingPolicy);
 
             _grid.Columns.Add("ColumnLetter", "列位置(A/B...)");
             _grid.Columns.Add("ColumnName", "列名");
@@ -170,6 +190,7 @@ namespace ExcelChatAddin
             bottom.Controls.Add(btnClose);
 
             Controls.Add(_grid);
+            Controls.Add(splittingPanel);
             Controls.Add(top);
             Controls.Add(bottom);
         }
@@ -204,6 +225,7 @@ namespace ExcelChatAddin
                     // 定義なし → Excelヘッダーから自動生成
                     _numHeaderRow.Value = 1;
                     _numDataStartRow.Value = 2;
+                    _txtSplittingPolicy.Text = "";
                     _grid.Rows.Clear();
 
                     if (excelColumns.Count > 0)
@@ -246,6 +268,7 @@ namespace ExcelChatAddin
 
                 _numHeaderRow.Value = Math.Max(1, cfg.HeaderRow);
                 _numDataStartRow.Value = Math.Max(1, cfg.DataStartRow);
+                _txtSplittingPolicy.Text = cfg.SplittingPolicy ?? "";
 
                 // 差分マージ: Excelヘッダー情報がある場合
                 var mergedColumns = MergeColumnsWithExcel(cfg.Columns, excelColumns);
@@ -560,7 +583,8 @@ namespace ExcelChatAddin
                     DataStartRow = dataStartRow,
                     ValuePolicy = "strict",
                     KeyColumnLetter = keyCols[0].ColumnLetter,
-                    Columns = cols
+                    Columns = cols,
+                    SplittingPolicy = (_txtSplittingPolicy.Text ?? "").Trim()
                 };
 
                 IssueSchemaManager.Upsert(_store, cfg);
@@ -618,6 +642,7 @@ namespace ExcelChatAddin
                 _grid.Rows.Clear();
                 _numHeaderRow.Value = 1;
                 _numDataStartRow.Value = 2;
+                _txtSplittingPolicy.Text = "";
                 _cmbTableName.Text = "";
                 MessageBox.Show($"「{tableName}」の定義を削除しました。");
             }
@@ -656,7 +681,8 @@ namespace ExcelChatAddin
                     {
                         HeaderRow = (int)_numHeaderRow.Value,
                         DataStartRow = (int)_numDataStartRow.Value,
-                        Columns = cols
+                        Columns = cols,
+                        SplittingPolicy = (_txtSplittingPolicy.Text ?? "").Trim()
                     };
 
                     var entry = SchemaTemplateManager.FromSchema(schema, dlg.TemplateName, dlg.TemplateDescription);
@@ -716,6 +742,7 @@ namespace ExcelChatAddin
                 // グリッドにテンプレート列定義を反映
                 _numHeaderRow.Value = Math.Max(1, tmpl.HeaderRow);
                 _numDataStartRow.Value = Math.Max(2, tmpl.DataStartRow);
+                _txtSplittingPolicy.Text = tmpl.SplittingPolicy ?? "";
 
                 _grid.Rows.Clear();
                 if (tmpl.Columns != null)
@@ -752,7 +779,8 @@ namespace ExcelChatAddin
                     DataStartRow = (int)_numDataStartRow.Value,
                     ValuePolicy = "strict",
                     KeyColumnLetter = keyCols.Count > 0 ? keyCols[0].ColumnLetter : (cols.Count > 0 ? cols[0].ColumnLetter : "A"),
-                    Columns = cols
+                    Columns = cols,
+                    SplittingPolicy = (_txtSplittingPolicy.Text ?? "").Trim()
                 };
 
                 IssueSchemaManager.Upsert(_store, cfg);
@@ -826,7 +854,7 @@ namespace ExcelChatAddin
 
                 string[] headers =
                 {
-                    "テーブル名", "シート名", "ヘッダー行", "データ開始行", "キー列",
+                    "テーブル名", "シート名", "ヘッダー行", "データ開始行", "キー列", "分割基準",
                     "列レター", "列名", "型", "キー", "必須", "値候補", "例", "意味", "更新モード"
                 };
 
@@ -894,20 +922,21 @@ namespace ExcelChatAddin
             ws.Cells[row, 3].Value2 = table.HeaderRow;
             ws.Cells[row, 4].Value2 = table.DataStartRow;
             ws.Cells[row, 5].Value2 = table.KeyColumnLetter ?? "";
+            ws.Cells[row, 6].Value2 = table.SplittingPolicy ?? "";
 
             if (col == null) return;
 
-            ws.Cells[row, 6].Value2 = col.ColumnLetter ?? "";
-            ws.Cells[row, 7].Value2 = col.ColumnName ?? "";
-            ws.Cells[row, 8].Value2 = col.ValueType ?? "";
-            ws.Cells[row, 9].Value2 = col.IsKey ? "○" : "";
-            ws.Cells[row, 10].Value2 = col.IsRequired ? "○" : "";
-            ws.Cells[row, 11].Value2 = col.AllowedValues != null && col.AllowedValues.Count > 0
+            ws.Cells[row, 7].Value2 = col.ColumnLetter ?? "";
+            ws.Cells[row, 8].Value2 = col.ColumnName ?? "";
+            ws.Cells[row, 9].Value2 = col.ValueType ?? "";
+            ws.Cells[row, 10].Value2 = col.IsKey ? "○" : "";
+            ws.Cells[row, 11].Value2 = col.IsRequired ? "○" : "";
+            ws.Cells[row, 12].Value2 = col.AllowedValues != null && col.AllowedValues.Count > 0
                 ? string.Join(", ", col.AllowedValues)
                 : "";
-            ws.Cells[row, 12].Value2 = col.ExampleValue ?? "";
-            ws.Cells[row, 13].Value2 = col.Meaning ?? "";
-            ws.Cells[row, 14].Value2 = col.UpdateMode ?? "overwrite";
+            ws.Cells[row, 13].Value2 = col.ExampleValue ?? "";
+            ws.Cells[row, 14].Value2 = col.Meaning ?? "";
+            ws.Cells[row, 15].Value2 = col.UpdateMode ?? "overwrite";
         }
 
         private bool ExcelTableExists(string tableName)

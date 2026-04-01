@@ -112,6 +112,22 @@ namespace ExcelChatAddin
             sb.AppendLine("3. 既存テーブルデータとの整合性（重複キー、関連項目の参照先が実在するか等）");
             sb.AppendLine("4. 必須列が空文字・null・省略されていないか");
             sb.AppendLine();
+
+            if (!string.IsNullOrWhiteSpace(schema.SplittingPolicy))
+            {
+                sb.AppendLine("5. 行の分割基準に沿って適切な粒度で行が分割されているか（異なる観点が1行に混在していないか、過度に統合されていないか）");
+                sb.AppendLine();
+                sb.AppendLine("【行の分割基準】");
+                sb.AppendLine(schema.SplittingPolicy);
+                sb.AppendLine();
+                sb.AppendLine("- 分割基準の各観点が混在している行がある場合は、finding として severity=warning, rule=splitting_policy で指摘し、revisedOperations では分割した複数行に修正してください。");
+                sb.AppendLine();
+            }
+            sb.AppendLine("【注意: 日付型の扱い】");
+            sb.AppendLine("- 型が date の列は YYYY-MM-DD 形式（例: 2025-07-15）で記載してください。これが正しい形式です。");
+            sb.AppendLine("- Excelシリアル値への変換は不要です。プログラム側で自動変換します。");
+            sb.AppendLine("- date 型の列について「シリアル値に変換せよ」という指摘は出さないでください。");
+            sb.AppendLine();
             sb.AppendLine("★ 必ず以下のJSON形式のみで回答してください。余計な説明は不要です。");
             sb.AppendLine("```json");
             sb.AppendLine("{");
@@ -214,6 +230,37 @@ namespace ExcelChatAddin
                 sb.AppendLine();
             }
             return sb.ToString();
+        }
+
+        // date型のシリアル値変換を要求する指摘を検出するパターン
+        private static readonly Regex DateSerialPattern = new Regex(
+            @"シリアル値|serial\s*値|serial\s*number|serial\s*format",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        /// <summary>
+        /// プログラム側で処理可能な指摘（date型のシリアル値変換等）を除外する。
+        /// </summary>
+        public static List<Finding> FilterSuppressedFindings(List<Finding> findings, IssueSchemaConfig schema)
+        {
+            if (findings == null || findings.Count == 0) return findings;
+            if (schema == null || schema.Columns == null) return findings;
+
+            // date 型の列名を収集
+            var dateColumnNames = new HashSet<string>(
+                schema.Columns
+                    .Where(c => string.Equals(c.ValueType, "date", StringComparison.OrdinalIgnoreCase))
+                    .Select(c => c.ColumnName ?? ""),
+                StringComparer.OrdinalIgnoreCase);
+
+            if (dateColumnNames.Count == 0) return findings;
+
+            return findings.Where(f =>
+            {
+                // date 型の列に対するシリアル値変換指摘を除外
+                if (dateColumnNames.Contains(f.Column) && DateSerialPattern.IsMatch(f.Message ?? ""))
+                    return false;
+                return true;
+            }).ToList();
         }
 
         /// <summary>

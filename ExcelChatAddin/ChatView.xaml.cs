@@ -721,6 +721,9 @@ namespace ExcelChatAddin
                     // パース
                     var result = ContentValidator.ParseValidationResponse(unmaskedValidation);
 
+                    // ★ プログラムで処理可能な指摘（date型シリアル値変換等）を除外
+                    result.Findings = ContentValidator.FilterSuppressedFindings(result.Findings, schema);
+
                     var log = new ContentValidator.IterationLog
                     {
                         Iteration = i,
@@ -1563,6 +1566,18 @@ namespace ExcelChatAddin
                     sb2.AppendLine($"| {dispLetter} | {c.ColumnName} | {(c.IsKey ? "○" : "")} | {(c.IsRequired ? "○" : "")} | {c.ValueType} | {modeLabel} | {allowed} | {c.ExampleValue} | {c.Meaning} |");
                 }
                 sb2.AppendLine();
+
+                // 分割ポリシーが定義されている場合、行分割の指示を追加
+                if (isUpdateTarget && !string.IsNullOrWhiteSpace(schema.SplittingPolicy))
+                {
+                    sb2.AppendLine("【行の分割基準】");
+                    sb2.AppendLine("ユーザーの入力を更新対象テーブルに反映する際、以下の分割基準に従って、1つの事象でも観点が異なる場合は複数行（複数の operation）に分解してください。");
+                    sb2.AppendLine("- 複数の観点が混在している場合、各観点ごとに別の行として起票すること。");
+                    sb2.AppendLine("- 分割した各行の関連性は、定義に「関連課題」等の列があればそこに相互のキー値を記載して紐付けること。");
+                    sb2.AppendLine();
+                    sb2.AppendLine(schema.SplittingPolicy);
+                    sb2.AppendLine();
+                }
             }
 
             // 更新対象テーブルが選択されている場合のみ JSON強制指示を付加
@@ -2138,7 +2153,10 @@ namespace ExcelChatAddin
                                 {
                                     var name = lo.Name ?? "";
                                     var addr = lo.Range?.Address[false, false, Excel.XlReferenceStyle.xlA1] ?? "A1";
-                                    var hasSchema = definedNames.Contains(name);
+                                    var hasSchema = definedNames.Contains(name)
+                                        || definedNames.Any(d =>
+                                            name.IndexOf(d, StringComparison.OrdinalIgnoreCase) >= 0
+                                            || d.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0);
                                     items.Add(new TableListItem
                                     {
                                         TableName = name,
@@ -2261,10 +2279,13 @@ namespace ExcelChatAddin
                     }
 
                     // 差分計算
-                    var diffEntries = BuildDiffEntries(app, schema, ops);
+                    var diffEntries = BuildDiffEntries(app, schema, ops, out string diagnosticReason);
                     if (diffEntries == null || diffEntries.Count == 0)
                     {
-                        MessageBox.Show("変更差分がありません（既に最新の状態です）。", "反映");
+                        var msg = "変更差分がありません（既に最新の状態です）。";
+                        if (!string.IsNullOrWhiteSpace(diagnosticReason))
+                            msg += "\n\n詳細: " + diagnosticReason;
+                        MessageBox.Show(msg, "反映");
                         return;
                     }
 
@@ -2391,7 +2412,14 @@ namespace ExcelChatAddin
                 {
                     var keyValue = (op["key"]?.ToString() ?? "").Trim();
                     var fields = op["fields"] as JObject;
-                    if (string.IsNullOrWhiteSpace(keyValue) || fields == null) continue;
+                    if (fields == null) continue;
+
+                    // key が明示されていなければ、fields 内のキー列名から取得
+                    if (string.IsNullOrWhiteSpace(keyValue) && keyCol != null)
+                    {
+                        keyValue = (fields[keyCol.ColumnName]?.ToString() ?? "").Trim();
+                    }
+                    if (string.IsNullOrWhiteSpace(keyValue)) continue;
 
                     int targetRow = -1;
                     int dataStart = schema.DataStartRow;
@@ -2441,20 +2469,42 @@ namespace ExcelChatAddin
         /// <summary>
         /// JSON operationsから差分エントリを計算する（書き込みは行わない）。
         /// </summary>
-        private List<DiffEntry> BuildDiffEntries(Excel.Application app, IssueSchemaConfig schema, List<JObject> operations)
+        private List<DiffEntry> BuildDiffEntries(Excel.Application app, IssueSchemaConfig schema, List<JObject> operations, out string diagnosticReason)
         {
+            diagnosticReason = null;
             var result = new List<DiffEntry>();
-            if (schema == null || schema.Columns == null || schema.Columns.Count == 0) return result;
+            if (schema == null)
+            {
+                diagnosticReason = "スキーマが null です（表設定が読み込めていない可能性があります）。";
+                return result;
+            }
+            if (schema.Columns == null || schema.Columns.Count == 0)
+            {
+                diagnosticReason = $"スキーマ '{schema.TableName}' に列定義がありません。";
+                return result;
+            }
 
             var wb = app.ActiveWorkbook;
-            if (wb == null) return result;
+            if (wb == null)
+            {
+                diagnosticReason = "アクティブなブックがありません。";
+                return result;
+            }
 
             Excel.ListObject targetTable;
             Excel.Worksheet ws;
-            if (!TryFindTableByName(wb, schema.TableName, out ws, out targetTable)) return result;
+            if (!TryFindTableByName(wb, schema.TableName, out ws, out targetTable))
+            {
+                diagnosticReason = $"テーブル '{schema.TableName}' がブック内に見つかりません。";
+                return result;
+            }
 
             var liveNameToColumn = GetLiveHeaderNameToColumnIndex(targetTable);
-            if (liveNameToColumn.Count == 0) return result;
+            if (liveNameToColumn.Count == 0)
+            {
+                diagnosticReason = $"テーブル '{schema.TableName}' のヘッダー列を取得できませんでした。";
+                return result;
+            }
 
             var allowedNames = new HashSet<string>(
                 schema.Columns.Select(c => NormalizeHeaderName(c.ColumnName)),
@@ -2467,7 +2517,15 @@ namespace ExcelChatAddin
                 liveNameToColumn.TryGetValue(NormalizeHeaderName(keyCol.ColumnName), out keyColIdx);
                 if (keyColIdx <= 0) keyColIdx = ColumnLetterToIndex(keyCol.ColumnLetter);
             }
-            if (keyColIdx <= 0) return result;
+            if (keyColIdx <= 0)
+            {
+                var keyInfo = keyCol != null
+                    ? $"キー列名='{keyCol.ColumnName}', 列位置='{keyCol.ColumnLetter}'"
+                    : "キー列が未定義";
+                var liveHeaders = string.Join(", ", liveNameToColumn.Keys.Take(10));
+                diagnosticReason = $"キー列がテーブル上で見つかりません。{keyInfo}\nテーブルのヘッダー: {liveHeaders}";
+                return result;
+            }
 
             int dataStart = schema.DataStartRow;
             int lastRow = ws.Cells[ws.Rows.Count, keyColIdx].End[Excel.XlDirection.xlUp].Row;
@@ -2479,7 +2537,14 @@ namespace ExcelChatAddin
                 {
                     var keyValue = (op["key"]?.ToString() ?? "").Trim();
                     var fields = op["fields"] as JObject;
-                    if (string.IsNullOrWhiteSpace(keyValue) || fields == null) continue;
+                    if (fields == null) continue;
+
+                    // key が明示されていなければ、fields 内のキー列名から取得
+                    if (string.IsNullOrWhiteSpace(keyValue) && keyCol != null)
+                    {
+                        keyValue = (fields[keyCol.ColumnName]?.ToString() ?? "").Trim();
+                    }
+                    if (string.IsNullOrWhiteSpace(keyValue)) continue;
 
                     var opType = (op["type"]?.ToString() ?? "upsert").ToLowerInvariant();
 
@@ -2579,7 +2644,10 @@ namespace ExcelChatAddin
                     // 新規行はlastRowを進める
                     if (isNew) lastRow = newRowNum;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    DebugLogger.LogException(ex, "BuildDiffEntries operation processing");
+                }
             }
 
             return result;
@@ -2766,6 +2834,10 @@ namespace ExcelChatAddin
             if (wb == null || string.IsNullOrWhiteSpace(tableName)) return false;
             try
             {
+                // 完全一致を優先
+                Excel.Worksheet partialWs = null;
+                Excel.ListObject partialLo = null;
+
                 foreach (Excel.Worksheet sheet in wb.Worksheets)
                 {
                     if (sheet.ListObjects == null) continue;
@@ -2777,7 +2849,23 @@ namespace ExcelChatAddin
                             lo = t;
                             return true;
                         }
+                        // 部分一致候補を記憶（最初の1件）
+                        if (partialLo == null && t.Name != null &&
+                            (t.Name.IndexOf(tableName, StringComparison.OrdinalIgnoreCase) >= 0
+                             || tableName.IndexOf(t.Name, StringComparison.OrdinalIgnoreCase) >= 0))
+                        {
+                            partialWs = sheet;
+                            partialLo = t;
+                        }
                     }
+                }
+
+                // 完全一致なし → 部分一致でフォールバック
+                if (partialLo != null)
+                {
+                    ws = partialWs;
+                    lo = partialLo;
+                    return true;
                 }
             }
             catch { }

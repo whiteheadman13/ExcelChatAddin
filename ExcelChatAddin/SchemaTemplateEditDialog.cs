@@ -12,10 +12,12 @@ namespace ExcelChatAddin
         private TextBox _txtDesc;
         private NumericUpDown _numHeaderRow;
         private NumericUpDown _numDataStartRow;
+        private TextBox _txtSplittingPolicy;
         private DataGridView _grid;
 
         public string TemplateName => _txtName.Text.Trim();
         public string TemplateDescription => _txtDesc.Text.Trim();
+        public string TemplateSplittingPolicy => (_txtSplittingPolicy.Text ?? "").Trim();
         public int HeaderRow => (int)_numHeaderRow.Value;
         public int DataStartRow => (int)_numDataStartRow.Value;
 
@@ -27,10 +29,10 @@ namespace ExcelChatAddin
         public SchemaTemplateEditDialog(SchemaTemplateEntry entry)
         {
             Text = "テンプレート編集";
-            Size = new Size(1050, 620);
+            Size = new Size(1050, 760);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.Sizable;
-            MinimumSize = new Size(800, 400);
+            MinimumSize = new Size(800, 500);
 
             var top = new Panel { Dock = DockStyle.Top, Height = 100 };
 
@@ -98,6 +100,26 @@ namespace ExcelChatAddin
             _grid.CellDoubleClick += Grid_CellDoubleClick;
             _grid.DataError += (s, e) => { e.ThrowException = false; };
 
+            // --- 分割ポリシー パネル ---
+            var splittingPanel = new GroupBox
+            {
+                Text = "行の分割基準（1つの入力を複数行に分解する際のルール。空欄なら分割指示なし）",
+                Dock = DockStyle.Top,
+                Height = 120,
+                Padding = new Padding(8, 4, 8, 4)
+            };
+            _txtSplittingPolicy = new TextBox
+            {
+                Multiline = true,
+                ScrollBars = ScrollBars.Vertical,
+                Dock = DockStyle.Fill,
+                AcceptsReturn = true,
+                WordWrap = true,
+                Font = new Font("Yu Gothic UI", 9f)
+            };
+            _txtSplittingPolicy.Text = entry?.SplittingPolicy ?? "";
+            splittingPanel.Controls.Add(_txtSplittingPolicy);
+
             // 既存列定義をグリッドに読み込み
             if (entry?.Columns != null)
             {
@@ -140,6 +162,7 @@ namespace ExcelChatAddin
             bottom.Controls.Add(btnCancel);
 
             Controls.Add(_grid);
+            Controls.Add(splittingPanel);
             Controls.Add(top);
             Controls.Add(bottom);
 

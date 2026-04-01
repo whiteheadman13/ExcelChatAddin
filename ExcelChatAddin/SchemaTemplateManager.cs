@@ -14,6 +14,7 @@ namespace ExcelChatAddin
         public int HeaderRow { get; set; } = 1;
         public int DataStartRow { get; set; } = 2;
         public List<IssueSchemaColumn> Columns { get; set; } = new List<IssueSchemaColumn>();
+        public string SplittingPolicy { get; set; } = "";
         public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     }
 
@@ -61,6 +62,7 @@ namespace ExcelChatAddin
                             HeaderRow = Math.Max(1, x.HeaderRow),
                             DataStartRow = Math.Max(2, x.DataStartRow),
                             Columns = x.Columns ?? new List<IssueSchemaColumn>(),
+                            SplittingPolicy = (x.SplittingPolicy ?? "").Trim(),
                             CreatedAtUtc = x.CreatedAtUtc
                         })
                         .ToList();
@@ -101,6 +103,7 @@ namespace ExcelChatAddin
                 HeaderRow = schema.HeaderRow,
                 DataStartRow = schema.DataStartRow,
                 Columns = columns,
+                SplittingPolicy = (schema.SplittingPolicy ?? "").Trim(),
                 CreatedAtUtc = DateTime.UtcNow
             };
         }

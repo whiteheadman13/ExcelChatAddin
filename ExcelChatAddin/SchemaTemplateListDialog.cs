@@ -88,6 +88,12 @@ namespace ExcelChatAddin
             lines.Add($"ヘッダー行: {t.HeaderRow}");
             lines.Add($"データ開始行: {t.DataStartRow}");
             lines.Add($"列数: {t.Columns?.Count ?? 0}");
+            if (!string.IsNullOrWhiteSpace(t.SplittingPolicy))
+            {
+                lines.Add("");
+                lines.Add("--- 分割基準 ---");
+                lines.Add(t.SplittingPolicy);
+            }
             lines.Add("");
             lines.Add("--- 列定義 ---");
 
@@ -135,6 +141,7 @@ namespace ExcelChatAddin
                 cur.HeaderRow = dlg.HeaderRow;
                 cur.DataStartRow = dlg.DataStartRow;
                 cur.Columns = dlg.ResultColumns;
+                cur.SplittingPolicy = dlg.TemplateSplittingPolicy;
                 SchemaTemplateManager.SaveAll(_items);
                 LoadItems();
             }

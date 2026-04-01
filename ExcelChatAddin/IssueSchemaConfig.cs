@@ -36,6 +36,13 @@ namespace ExcelChatAddin
         public string KeyColumnLetter { get; set; } = "A";
         public List<IssueSchemaColumn> Columns { get; set; } = new List<IssueSchemaColumn>();
         public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// 行の意味的な分割基準（テーブルレベルの運用ルール）。
+        /// LLMが1つの入力を複数行に分解する際の判断基準として送信される。
+        /// 空の場合は分割指示を行わない。改行を含む自由記述。
+        /// </summary>
+        public string SplittingPolicy { get; set; } = "";
     }
 
     /// <summary>
@@ -116,12 +123,21 @@ namespace ExcelChatAddin
             File.WriteAllText(Paths.TableSchemaPath, json);
         }
 
-        /// <summary>テーブル名で定義を検索する。</summary>
+        /// <summary>テーブル名で定義を検索する。完全一致優先、なければ部分一致でフォールバック。</summary>
         public static IssueSchemaConfig FindByTableName(TableSchemaStore store, string tableName)
         {
             if (store == null || string.IsNullOrWhiteSpace(tableName)) return null;
-            return store.Tables.FirstOrDefault(t =>
+
+            // 完全一致
+            var exact = store.Tables.FirstOrDefault(t =>
                 string.Equals(t.TableName, tableName, StringComparison.OrdinalIgnoreCase));
+            if (exact != null) return exact;
+
+            // 部分一致: ListObject名がスキーマのTableNameを含む、またはその逆
+            return store.Tables.FirstOrDefault(t =>
+                !string.IsNullOrWhiteSpace(t.TableName) &&
+                (tableName.IndexOf(t.TableName, StringComparison.OrdinalIgnoreCase) >= 0
+                 || t.TableName.IndexOf(tableName, StringComparison.OrdinalIgnoreCase) >= 0));
         }
 
         /// <summary>テーブル定義を追加または更新する。</summary>
@@ -164,6 +180,7 @@ namespace ExcelChatAddin
             cfg.ValuePolicy = "strict";
             cfg.HeaderRow = Math.Max(1, cfg.HeaderRow);
             cfg.DataStartRow = Math.Max(cfg.HeaderRow + 1, cfg.DataStartRow);
+            cfg.SplittingPolicy = (cfg.SplittingPolicy ?? "").Trim();
 
             foreach (var c in cfg.Columns)
             {

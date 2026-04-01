@@ -3,6 +3,33 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (テーブルレベルの行分割基準 SplittingPolicy 追加)
+- 事象:
+  1. キー列の Meaning に F-L-P 等の分割基準を記載しても、LLM は列の値の意味としか解釈せず、行の分解ルールとして機能しない
+  2. テーブルレベルの「行の分割基準」を定義・送信する仕組みがない
+  3. 検証ループ（ContentValidator）でも分割粒度がチェックされない
+- 修正内容:
+  1. `IssueSchemaConfig` に `SplittingPolicy` プロパティを追加（改行可の自由記述）
+  2. `Normalize` で `SplittingPolicy` のトリム処理を追加
+  3. `IssueSchemaSettingsDialog` に分割ポリシー入力用の GroupBox + 複数行 TextBox を追加（改行許可・広め 120px）
+  4. `LoadSchemaForTable` / `BtnSave_Click` / `BtnDelete_Click` で `SplittingPolicy` の読み書き・クリアを追加
+  5. `BuildSchemaSection` に分割ポリシー指示ブロックを追加（更新対象テーブル選択時のみ）
+  6. `ContentValidator.BuildValidationPrompt` に分割検証の観点（splitting_policy）を追加
+  7. 定義Excel出力のヘッダーに「分割基準」列を追加、`WriteTableDefinitionRow` で出力
+  8. `SchemaTemplateEntry` に `SplittingPolicy` プロパティ追加
+  9. `SchemaTemplateManager.FromSchema` / `SaveAll` で `SplittingPolicy` を保持
+  10. `SchemaTemplateEditDialog` に分割ポリシー GroupBox + TextBox を追加、`TemplateSplittingPolicy` プロパティで返却
+  11. `SchemaTemplateListDialog` の編集結果保存で `SplittingPolicy` を反映、プレビューに分割基準を表示
+  12. テンプレート保存/挿入で `SplittingPolicy` を保持
+- 対象モジュール:
+  - `ExcelChatAddin/IssueSchemaConfig.cs`
+  - `ExcelChatAddin/IssueSchemaSettingsDialog.cs`
+  - `ExcelChatAddin/ChatView.xaml.cs`
+  - `ExcelChatAddin/ContentValidator.cs`
+  - `ExcelChatAddin/SchemaTemplateManager.cs`
+  - `ExcelChatAddin/SchemaTemplateEditDialog.cs`
+  - `ExcelChatAddin/SchemaTemplateListDialog.cs`
+
 ## Session Update (チャット表示を10行に制限 + 全文ポップアップ)
 - 事象:
   1. 1回のチャット表示は最大10行までにしたい
@@ -377,4 +404,16 @@
   1. `BuildMaskedPayload` で `_selectedUpdateTable` が設定されている場合、そのテーブルの範囲キーを `referencedKeys` に自動追加し、表データ本体もペイロードに含める
   2. `btnSendGemini_Click` の送信完了後（正常系・異常系とも）に `_selectedUpdateTable = null` + `cmbUpdateTarget.SelectedIndex = 0` でリセット
 - 対象モジュール:
+  - `ExcelChatAddin/ChatView.xaml.cs`
+
+## Session Update (検証ループのdate型シリアル値変換誤指摘の回避)
+- 事象:
+  1. 検証ループでLLMバリデーターが date 型の列に「Excelシリアル値に変換せよ」と誤指摘する
+  2. YYYY-MM-DD 形式で実際は問題ないが、検証3回繰り返しても解消されず残存指摘として表示される
+- 修正内容:
+  1. `ContentValidator.BuildValidationPrompt` に「date型は YYYY-MM-DD 形式が正しい。シリアル値変換は不要」を明記
+  2. `ContentValidator.FilterSuppressedFindings` を追加: date 型列に対するシリアル値変換指摘をプログラム的に除外
+  3. `RunValidationLoopAsync` でパース直後に `FilterSuppressedFindings` を適用し、フィルタ後の件数でループ判定
+- 対象モジュール:
+  - `ExcelChatAddin/ContentValidator.cs`
   - `ExcelChatAddin/ChatView.xaml.cs`
