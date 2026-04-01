@@ -5,6 +5,7 @@ using System.Windows.Forms;
 using Excel = Microsoft.Office.Interop.Excel;
 using Office = Microsoft.Office.Core;
 using System.Runtime.InteropServices;
+using OfficeMasking.Core;
 
 
 
@@ -69,6 +70,10 @@ namespace ExcelChatAddin
 
         private void ThisAddIn_Startup(object sender, EventArgs e)
         {
+            // OfficeMasking.Core 初期化
+            Paths.InitLegacyDllDirectory();
+            MaskingEngine.SetLogger(DebugMaskingLogger.Instance);
+
             PurgeMaskMenus();     // 全掃除
 
             AddMaskManageMenu();  // ★通常モード専用

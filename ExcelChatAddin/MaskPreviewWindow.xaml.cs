@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Media;
+using OfficeMasking.Core;
 
 namespace ExcelChatAddin
 {

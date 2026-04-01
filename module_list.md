@@ -3,6 +3,44 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (マスキング/辞書管理の共通ライブラリ化)
+- 事象:
+  1. ExcelアドインとPowerPointアドインで MaskingEngine / DictionaryManagerLogic / Paths が重複している
+  2. 片方を更新するたびにもう片方も手動で合わせる必要があり保守コストが高い
+- 修正内容:
+  1. `OfficeMasking.Core` クラスライブラリを新規作成（.NET Framework 4.8, SDK-style csproj）
+  2. `IMaskingLogger` / `NullMaskingLogger` を追加し、DebugLogger への直接依存を除去
+  3. `MaskingPaths` を作成: DataDir / RulesPath / CategoriesPath / LegacyRulesPath / EnsureDataDir + 移行ロジック
+  4. `MaskingEngine` を Core に移設: ルール管理 / Mask / Unmask / バックアップ / ロード失敗保護
+  5. `DictionaryManagerLogic` を Core に移設: フィルタ判定 / 削除候補抽出 / バリデーション / プレースホルダ生成
+  6. `OfficeMasking.Core.Tests` テストプロジェクトを新規作成（MSTest）
+  7. ExcelChatAddin から OfficeMasking.Core をプロジェクト参照し、旧ファイルを削除
+  8. ExcelChatAddin の `Paths.cs` を委譲方式に変更（共通部分は MaskingPaths へ委譲、Excel固有パスはそのまま）
+  9. ExcelChatAddin に `DebugMaskingLogger` アダプターを追加し、起動時にセット
+- 対象モジュール（新規）:
+  - `OfficeMasking.Core/OfficeMasking.Core.csproj`
+  - `OfficeMasking.Core/IMaskingLogger.cs`
+  - `OfficeMasking.Core/NullMaskingLogger.cs`
+  - `OfficeMasking.Core/MaskingPaths.cs`
+  - `OfficeMasking.Core/MaskingEngine.cs`
+  - `OfficeMasking.Core/DictionaryManagerLogic.cs`
+  - `OfficeMasking.Core.Tests/OfficeMasking.Core.Tests.csproj`
+  - `OfficeMasking.Core.Tests/MaskingPathsTests.cs`
+  - `OfficeMasking.Core.Tests/MaskingEngineTests.cs`
+  - `OfficeMasking.Core.Tests/DictionaryManagerLogicTests.cs`
+- 対象モジュール（変更）:
+  - `ExcelChatAddin/ExcelChatAddin.csproj`（ProjectReference 追加）
+  - `ExcelChatAddin/Paths.cs`（共通部分を MaskingPaths へ委譲）
+  - `ExcelChatAddin/ThisAddIn.cs`（ロガー初期化追加）
+  - `ExcelChatAddin/ChatRibbon.cs`（using 追加）
+  - `ExcelChatAddin/ChatView.xaml.cs`（using 追加）
+  - `ExcelChatAddin/DictionaryManager.cs`（using 追加）
+  - `ExcelChatAddin/MaskPreviewWindow.xaml.cs`（using 追加）
+  - `ExcelChatAddin/RegisterDialog.cs`（using 追加）
+- 対象モジュール（削除）:
+  - `ExcelChatAddin/MaskingEngine.cs`
+  - `ExcelChatAddin/DictionaryManagerLogic.cs`
+
 ## Session Update (テーブルレベルの行分割基準 SplittingPolicy 追加)
 - 事象:
   1. キー列の Meaning に F-L-P 等の分割基準を記載しても、LLM は列の値の意味としか解釈せず、行の分解ルールとして機能しない

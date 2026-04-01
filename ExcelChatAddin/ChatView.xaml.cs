@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using OfficeMasking.Core;
 using System.Windows.Input;
 using Newtonsoft.Json.Linq;
 using Excel = Microsoft.Office.Interop.Excel;

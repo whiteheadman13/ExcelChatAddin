@@ -1,56 +1,34 @@
 using System;
 using System.IO;
 using System.Reflection;
+using OfficeMasking.Core;
 
 namespace ExcelChatAddin
 {
     /// <summary>
     /// アドインの永続データ保存先を一元管理する。
-    /// ・環境変数 OFFICE_MASKING_DATA_DIR があれば最優先
-    /// ・なければ AppData\OfficeChatMasking に保存（PowerPoint/Excel共通の既定）
-    /// ・旧フォルダ（AppData\PowerPointMasking）からの移行もサポート
+    /// 共通のマスキング系パスは OfficeMasking.Core.MaskingPaths に委譲し、
+    /// Excel固有のパス（テンプレート、スキーマ等）だけをここで定義する。
     /// </summary>
     public static class Paths
     {
-        // ★ 共通化の要：環境変数名
-        private const string EnvVarName = "OFFICE_MASKING_DATA_DIR";
+        // ── 共通パス（MaskingPaths に委譲） ──
 
-        // ★ 環境変数未設定時の既定フォルダ名（Office共通）
-        public const string DefaultFolderName = "OfficeChatMasking";
+        public static string AppDataDir => MaskingPaths.AppDataDir;
 
-        // ★ 旧PowerPoint版の既定フォルダ名（移行用）
-        private const string LegacyFolderName = "PowerPointMasking";
+        public static string DataDir => MaskingPaths.DataDir;
 
-        public static string AppDataDir
-            => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        public static string LegacyDataDir => MaskingPaths.LegacyDataDir;
 
-        /// <summary>
-        /// 永続データのルート
-        /// 優先順位：環境変数 > AppData\DefaultFolderName
-        /// </summary>
-        public static string DataDir
-        {
-            get
-            {
-                var env = Environment.GetEnvironmentVariable(EnvVarName);
-                if (!string.IsNullOrWhiteSpace(env))
-                {
-                    // %USERPROFILE% などを許容
-                    return Environment.ExpandEnvironmentVariables(env.Trim());
-                }
+        public static string ConfigPath => MaskingPaths.ConfigPath;
 
-                return Path.Combine(AppDataDir, DefaultFolderName);
-            }
-        }
+        public static string RulesPath => MaskingPaths.RulesPath;
 
-        /// <summary>
-        /// 旧PowerPointデータのルート（移行元）
-        /// </summary>
-        public static string LegacyDataDir
-            => Path.Combine(AppDataDir, LegacyFolderName);
+        public static string CategoriesPath => MaskingPaths.CategoriesPath;
 
-        public static string ConfigPath
-            => Path.Combine(DataDir, "config.json");
+        public static string LegacyRulesPath => MaskingPaths.LegacyRulesPath;
+
+        // ── Excel 固有パス ──
 
         public static string TemplatesPath
             => Path.Combine(DataDir, "diagram_templates.json");
@@ -66,75 +44,51 @@ namespace ExcelChatAddin
         public static string IssueSchemaPath
             => Path.Combine(DataDir, "issue_schema.json");
 
-        public static string RulesPath
-            => Path.Combine(DataDir, "rules.json");
+        // ── 初期化 ──
 
-        public static string CategoriesPath
-        {
-            get { return Path.Combine(DataDir, "categories.txt"); }
-        }
-
-
-        // 旧設計（DLL直下保存）の rules.json を拾うためのパス（既存互換）
-        public static string LegacyRulesPath
-        {
-            get
-            {
-                string dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-                if (string.IsNullOrEmpty(dir)) dir = DataDir;
-                return Path.Combine(dir, "rules.json");
-            }
-        }
-
+        /// <summary>
+        /// 起動時に呼び出す。共通ディレクトリ確保 + 旧データ移行 + Excel固有テンプレート移行。
+        /// </summary>
         public static void EnsureDataDir()
         {
-            if (!Directory.Exists(DataDir))
-            {
-                Directory.CreateDirectory(DataDir);
-            }
+            // 共通（rules/categories/config の移行含む）
+            MaskingPaths.EnsureDataDir();
 
-            // 旧PowerPointフォルダからの移行（必要なときだけ）
-            TryMigrateFromLegacyAppData();
-
-            // DLL直下ルールが残っているケースの移行（必要なときだけ）
-            TryMigrateFromLegacyDll();
+            // Excel 固有：旧PowerPointフォルダからのテンプレート移行
+            TryMigrateTemplatesFromLegacy();
         }
 
-        private static void TryMigrateFromLegacyAppData()
+        /// <summary>
+        /// MaskingPaths.LegacyDllDirectory を Assembly.Location で初期化する。
+        /// ThisAddIn_Startup で一度だけ呼ぶ。
+        /// </summary>
+        public static void InitLegacyDllDirectory()
         {
             try
             {
-                // DataDir が旧フォルダそのものの場合は何もしない
-                if (string.Equals(DataDir.TrimEnd('\\'), LegacyDataDir.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
-                    return;
-
-                if (!Directory.Exists(LegacyDataDir)) return;
-
-                // すでに新側に rules.json があるなら移行不要
-                if (File.Exists(RulesPath) || File.Exists(CategoriesPath) || File.Exists(ConfigPath) || File.Exists(TemplatesPath))
-                    return;
-
-                CopyIfExists(Path.Combine(LegacyDataDir, "rules.json"), RulesPath);
-                CopyIfExists(Path.Combine(LegacyDataDir, "categories.txt"), CategoriesPath);
-                CopyIfExists(Path.Combine(LegacyDataDir, "config.json"), ConfigPath);
-                CopyIfExists(Path.Combine(LegacyDataDir, "diagram_templates.json"), TemplatesPath);
+                string dir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    MaskingPaths.LegacyDllDirectory = dir;
+                }
             }
             catch
             {
-                // 移行失敗しても起動は止めない
             }
         }
 
-        private static void TryMigrateFromLegacyDll()
+        private static void TryMigrateTemplatesFromLegacy()
         {
             try
             {
-                if (File.Exists(RulesPath)) return;
+                var legacyDir = MaskingPaths.LegacyDataDir;
+                if (string.Equals(DataDir.TrimEnd('\\'), legacyDir.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
+                    return;
 
-                var legacy = LegacyRulesPath;
-                if (!File.Exists(legacy)) return;
+                if (!Directory.Exists(legacyDir)) return;
 
-                File.Copy(legacy, RulesPath, overwrite: false);
+                // テンプレートファイルだけ移行（rules等は MaskingPaths 側で済み）
+                CopyIfExists(Path.Combine(legacyDir, "diagram_templates.json"), TemplatesPath);
             }
             catch
             {

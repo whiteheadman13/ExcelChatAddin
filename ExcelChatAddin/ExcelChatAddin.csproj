@@ -201,10 +201,10 @@
     </Compile>
     <Compile Include="ContentValidator.cs" />
     <Compile Include="DebugLogger.cs" />
+    <Compile Include="DebugMaskingLogger.cs" />
     <Compile Include="DictionaryManager.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="DictionaryManagerLogic.cs" />
     <Compile Include="DiffPreviewDialog.cs">
       <SubType>Form</SubType>
     </Compile>
@@ -218,7 +218,6 @@
     <Compile Include="IssueSchemaSettingsDialog.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="MaskingEngine.cs" />
     <Compile Include="Paths.cs" />
     <Compile Include="Properties\AssemblyInfo.cs">
       <SubType>Code</SubType>
@@ -302,6 +301,11 @@
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>
     </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OfficeMasking.Core\OfficeMasking.Core.csproj">
+      <Name>OfficeMasking.Core</Name>
+    </ProjectReference>
   </ItemGroup>
   <PropertyGroup>
     <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>

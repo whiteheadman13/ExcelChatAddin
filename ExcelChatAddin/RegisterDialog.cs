@@ -5,6 +5,7 @@ using System.Windows.Forms;
 using System.IO;                // ファイル操作用
 using System.Reflection;        // パス取得用
 using System.Linq;
+using OfficeMasking.Core;
 
 namespace ExcelChatAddin
 {
