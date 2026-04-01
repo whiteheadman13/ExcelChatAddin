@@ -3,6 +3,23 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (MaskingRulesStore: 保存ロジック集約・更新時バックアップ)
+- 事象:
+  1. MaskingEngine に保存・バックアップ・復元・読込ロジックが混在し責務が大きすぎた
+  2. バックアップが起動時のみで、更新時（AddRule/OverrideRules等）にはバックアップが取られなかった
+- 修正内容:
+  1. `MaskingRulesStore` を新規作成: 読込（Load）・保存（Save）・バックアップローテーション・復元を集約
+  2. `Save` のたびにバックアップローテーション（50世代保持）を実行するよう変更
+  3. `MaskingEngine` から保存・読込・バックアップ・復元ロジックを除去し `MaskingRulesStore` に委譲
+  4. `MaskingRulesStoreTests` を新規作成（Load/Save/バックアップ/復元/旧形式エラー/50世代）
+  5. `MaskingEngineTests` を整理（Store側でカバーするテストを移動）
+- 対象モジュール（新規）:
+  - `OfficeMasking.Core/MaskingRulesStore.cs`
+  - `OfficeMasking.Core.Tests/MaskingRulesStoreTests.cs`
+- 対象モジュール（変更）:
+  - `OfficeMasking.Core/MaskingEngine.cs`
+  - `OfficeMasking.Core.Tests/MaskingEngineTests.cs`
+
 ## Session Update (辞書ファイル保護強化: バックアップ50世代・旧形式エラー化・環境変数必須化)
 - 事象:
   1. 起動時に旧形式プレースホルダー([..])を自動変換してrules.jsonを上書きしていた

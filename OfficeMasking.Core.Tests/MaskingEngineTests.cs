@@ -225,15 +225,26 @@ namespace OfficeMasking.Core.Tests
         }
 
         [TestMethod]
-        public void BackupRules_CreatesBackupFiles()
+        public void BackupRules_CreatedOnUpdate()
         {
             var data = new Dictionary<string, string> { { "バックアップテスト", "__BK_1__" } };
             File.WriteAllText(Path.Combine(_tempDir, "rules.json"),
                 JsonConvert.SerializeObject(data, Formatting.Indented));
 
             MaskingEngine.ResetInstance();
-            // Instance にアクセスしてコンストラクタ（LoadRules → BackupRulesOnStartup）を発火させる
-            var _ = MaskingEngine.Instance;
+            // 更新操作でバックアップが作られる
+            MaskingEngine.Instance.AddRule("追加テスト", "ADD");
+
+            Assert.IsTrue(File.Exists(Path.Combine(_tempDir, "rules.json.bak1")));
+        }
+
+        [TestMethod]
+        public void AddRule_CreatesBackupOnSave()
+        {
+            // 初回保存
+            MaskingEngine.Instance.AddRule("初回", "TEST");
+            // 2回目保存でバックアップが作られる
+            MaskingEngine.Instance.AddRule("2回目", "TEST");
 
             Assert.IsTrue(File.Exists(Path.Combine(_tempDir, "rules.json.bak1")));
         }
@@ -244,24 +255,6 @@ namespace OfficeMasking.Core.Tests
             MaskingEngine.SetLogger(null);
             // 例外が出なければOK
             MaskingEngine.Instance.AddRule("ログテスト", "LOG");
-        }
-
-        [TestMethod]
-        public void BackupRules_Keeps50Generations()
-        {
-            var rulesPath = Path.Combine(_tempDir, "rules.json");
-
-            for (int i = 1; i <= 55; i++)
-            {
-                var data = new Dictionary<string, string> { { "k" + i, "__V_" + i + "__" } };
-                File.WriteAllText(rulesPath, JsonConvert.SerializeObject(data, Formatting.Indented));
-                MaskingEngine.ResetInstance();
-                var _ = MaskingEngine.Instance;
-            }
-
-            Assert.IsTrue(File.Exists(rulesPath + ".bak1"));
-            Assert.IsTrue(File.Exists(rulesPath + ".bak50"));
-            Assert.IsFalse(File.Exists(rulesPath + ".bak51"));
         }
 
         [TestMethod]

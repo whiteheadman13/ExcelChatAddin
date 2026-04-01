@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using OfficeMasking.Core;
@@ -16,6 +18,7 @@ namespace ExcelChatAddin
         private Button _btnClose;
         private Button _btnDelete;
         private Button _btnAdd;
+        private Button _btnOpenFolder;
         private Dictionary<string, string> _originalData;
 
         public DictionaryManager()
@@ -60,6 +63,9 @@ namespace ExcelChatAddin
             _btnAdd = new Button { Text = "新規登録", Location = new Point(120, 10), Width = 100 };
             _btnAdd.Click += BtnAdd_Click;
 
+            _btnOpenFolder = new Button { Text = "保存先を開く", Location = new Point(230, 10), Width = 110 };
+            _btnOpenFolder.Click += BtnOpenFolder_Click;
+
             _btnSave = new Button { Text = "更新して保存", Location = new Point(350, 10), Width = 100, Font = new Font(DefaultFont, FontStyle.Bold) };
             _btnSave.Click += BtnSave_Click;
 
@@ -68,6 +74,7 @@ namespace ExcelChatAddin
 
             pnlBottom.Controls.Add(_btnDelete);
             pnlBottom.Controls.Add(_btnAdd);
+            pnlBottom.Controls.Add(_btnOpenFolder);
             pnlBottom.Controls.Add(_btnSave);
             pnlBottom.Controls.Add(_btnClose);
 
@@ -228,6 +235,25 @@ namespace ExcelChatAddin
             catch (Exception ex)
             {
                 MessageBox.Show("保存エラー: " + ex.Message);
+            }
+        }
+
+        private void BtnOpenFolder_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                Paths.EnsureDataDir();
+                string folder = Path.GetDirectoryName(Paths.RulesPath) ?? Paths.DataDir;
+                if (!Directory.Exists(folder))
+                {
+                    Directory.CreateDirectory(folder);
+                }
+
+                Process.Start("explorer.exe", folder);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("フォルダを開けませんでした: " + ex.Message);
             }
         }
     }

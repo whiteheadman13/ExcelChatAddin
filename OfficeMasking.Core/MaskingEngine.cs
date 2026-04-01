@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Newtonsoft.Json;
 
 namespace OfficeMasking.Core
 {
@@ -15,10 +13,7 @@ namespace OfficeMasking.Core
         private Dictionary<string, string> _maskDb = new Dictionary<string, string>();
         private bool _loadFailed;
         private string _loadFailureMessage;
-
-        private string RulesPath => MaskingPaths.RulesPath;
-        private string LegacyRulesPath => MaskingPaths.LegacyRulesPath;
-        private const int MaxBackupGenerations = 50;
+        private MaskingRulesStore _store;
 
         public static MaskingEngine Instance => _instance ?? (_instance = new MaskingEngine());
 
@@ -44,6 +39,7 @@ namespace OfficeMasking.Core
 
         private MaskingEngine()
         {
+            _store = new MaskingRulesStore(_logger);
             LoadRules();
         }
 
@@ -64,7 +60,7 @@ namespace OfficeMasking.Core
             } while (_maskDb.ContainsValue(placeholder));
 
             _maskDb.Add(original, placeholder);
-            SaveRules();
+            _store.Save(_maskDb);
         }
 
         public void AddRuleWithPlaceholder(string original, string placeholder)
@@ -74,7 +70,7 @@ namespace OfficeMasking.Core
             if (string.IsNullOrWhiteSpace(placeholder)) return;
 
             _maskDb.Add(original, placeholder);
-            SaveRules();
+            _store.Save(_maskDb);
         }
 
         public Dictionary<string, string> GetExistingPlaceholdersWithExample()
@@ -102,7 +98,7 @@ namespace OfficeMasking.Core
         {
             EnsureAvailableForWrite();
             _maskDb = new Dictionary<string, string>(newRules ?? new Dictionary<string, string>());
-            SaveRules();
+            _store.Save(_maskDb);
         }
 
         public string Mask(string input)
@@ -140,24 +136,6 @@ namespace OfficeMasking.Core
             throw new InvalidOperationException(_loadFailureMessage ?? "マスキング辞書を読み込めないため保存できません。");
         }
 
-        private void SaveRules([System.Runtime.CompilerServices.CallerMemberName] string caller = null)
-        {
-            EnsureAvailableForWrite();
-
-            try
-            {
-                MaskingPaths.EnsureDataDir();
-                string json = JsonConvert.SerializeObject(_maskDb, Formatting.Indented);
-                File.WriteAllText(RulesPath, json);
-                _logger.LogInfo($"Saved masking rules: path='{RulesPath}', count={_maskDb.Count}, caller={caller}");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogException(ex, $"Failed to save masking rules: path='{RulesPath}'");
-                throw;
-            }
-        }
-
         private void LoadRules()
         {
             _maskDb = new Dictionary<string, string>();
@@ -166,44 +144,11 @@ namespace OfficeMasking.Core
 
             try
             {
-                MaskingPaths.EnsureDataDir();
-
-                // 削除された場合のみバックアップから復元
-                TryRestoreDeletedRulesFromBackup();
-
-                BackupRulesOnStartup();
-
-                if (!File.Exists(RulesPath))
+                var dict = _store.Load();
+                if (dict != null)
                 {
-                    _logger.LogInfo($"Masking rules file not found. path='{RulesPath}'");
-                    return;
+                    _maskDb = new Dictionary<string, string>(dict);
                 }
-
-                string json = File.ReadAllText(RulesPath);
-                if (string.IsNullOrWhiteSpace(json))
-                {
-                    throw new InvalidDataException("rules.json が空です。");
-                }
-
-                var dict = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
-                if (dict == null)
-                {
-                    throw new InvalidDataException("rules.json を辞書形式として読み込めませんでした。");
-                }
-
-                // 旧形式はエラーにする（起動時自動変換・上書き禁止）
-                foreach (var kvp in dict)
-                {
-                    if (kvp.Value != null && kvp.Value.StartsWith("[") && kvp.Value.EndsWith("]"))
-                    {
-                        throw new InvalidDataException(
-                            "旧形式プレースホルダー([..]) を検出しました。自動変換・上書きは行いません。\n"
-                            + "手動で [XXX] を __XXX__ 形式に変換してください。");
-                    }
-                }
-
-                _maskDb = new Dictionary<string, string>(dict);
-                _logger.LogInfo($"Loaded masking rules: path='{RulesPath}', count={_maskDb.Count}");
             }
             catch (Exception ex)
             {
@@ -211,56 +156,9 @@ namespace OfficeMasking.Core
                 _loadFailed = true;
                 _loadFailureMessage =
                     "マスキング辞書の読み込みに失敗しました。\n"
-                    + $"ファイル: {RulesPath}\n"
-                    + $"詳細: {ex.Message}\n"
-                    + $"起動時バックアップ: {RulesPath}.bak1 ～ {RulesPath}.bak{MaxBackupGenerations}";
-                _logger.LogException(ex, $"Failed to load masking rules: path='{RulesPath}'");
-            }
-        }
-
-        private void TryRestoreDeletedRulesFromBackup()
-        {
-            if (File.Exists(RulesPath)) return;
-
-            for (int i = 1; i <= MaxBackupGenerations; i++)
-            {
-                string bak = $"{RulesPath}.bak{i}";
-                if (!File.Exists(bak)) continue;
-
-                try
-                {
-                    File.Copy(bak, RulesPath, overwrite: false);
-                    _logger.LogInfo($"Restored rules from backup: '{bak}' -> '{RulesPath}'");
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogException(ex, $"Failed to restore rules from backup: '{bak}'");
-                }
-                return;
-            }
-        }
-
-        private void BackupRulesOnStartup()
-        {
-            try
-            {
-                if (!File.Exists(RulesPath)) return;
-
-                // 古い世代をシフト（50世代保持）
-                for (int i = MaxBackupGenerations; i >= 2; i--)
-                {
-                    string dst = $"{RulesPath}.bak{i}";
-                    string src = $"{RulesPath}.bak{i - 1}";
-                    if (File.Exists(dst)) File.Delete(dst);
-                    if (File.Exists(src)) File.Move(src, dst);
-                }
-
-                File.Copy(RulesPath, $"{RulesPath}.bak1", true);
-                _logger.LogInfo($"Backed up masking rules on startup: path='{RulesPath}', generations={MaxBackupGenerations}");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogException(ex, $"Failed to back up masking rules on startup: path='{RulesPath}'");
+                    + $"ファイル: {MaskingPaths.RulesPath}\n"
+                    + $"詳細: {ex.Message}";
+                _logger.LogException(ex, $"Failed to load masking rules: path='{MaskingPaths.RulesPath}'");
             }
         }
     }
