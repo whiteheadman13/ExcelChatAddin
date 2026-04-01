@@ -3,6 +3,34 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (辞書ファイル保護強化: バックアップ50世代・旧形式エラー化・環境変数必須化)
+- 事象:
+  1. 起動時に旧形式プレースホルダー([..])を自動変換してrules.jsonを上書きしていた
+  2. OFFICE_MASKING_DATA_DIR 配下のrules.jsonが意図せず消失・上書きされることがあった
+  3. バックアップが2世代しかなく復元困難だった
+- 修正内容:
+  1. `MaskingPaths` に `IsDataDirEnvironmentConfigured` プロパティ追加
+  2. `MaskingPaths.EnsureDataDir` で環境変数設定時は自動移行をスキップ
+  3. `MaskingPaths` の移行条件を OR→AND に変更（config.jsonだけで移行を止めない）
+  4. `MaskingEngine.LoadRules` で旧形式 `[..]` 検出時はエラー扱い（自動変換・上書き禁止）
+  5. `MaskingEngine` バックアップを50世代化（`MaxBackupGenerations=50`）
+  6. `MaskingEngine` に `TryRestoreDeletedRulesFromBackup` 追加（削除時バックアップから自動復元）
+  7. `MaskingEngine.SaveRules` に呼び出し元ログ（CallerMemberName）追加
+  8. Excel側 `Paths.cs` に `IsMaskingDataDirConfigured` 追加
+  9. Excel側 `ThisAddIn.ShowChat` で `OFFICE_MASKING_DATA_DIR` 未設定時エラー表示
+  10. パワポ側 `Paths.cs` に `IsDataDirEnvironmentConfigured` 追加、移行条件修正
+  11. パワポ側 `MaskingEngine.cs` に同等修正（50世代バックアップ、旧形式エラー化、復元ロジック）
+  12. テスト追加: 旧形式エラー確認、50世代バックアップ確認、復元確認、IsDataDirEnvironmentConfigured確認
+- 対象モジュール:
+  - `OfficeMasking.Core/MaskingPaths.cs`
+  - `OfficeMasking.Core/MaskingEngine.cs`
+  - `OfficeMasking.Core.Tests/MaskingPathsTests.cs`
+  - `OfficeMasking.Core.Tests/MaskingEngineTests.cs`
+  - `ExcelChatAddin/Paths.cs`
+  - `ExcelChatAddin/ThisAddIn.cs`
+  - `powerpoint_masking2/Paths.cs`
+  - `powerpoint_masking2/MaskingEngine.cs`
+
 ## Session Update (マスキング/辞書管理の共通ライブラリ化)
 - 事象:
   1. ExcelアドインとPowerPointアドインで MaskingEngine / DictionaryManagerLogic / Paths が重複している

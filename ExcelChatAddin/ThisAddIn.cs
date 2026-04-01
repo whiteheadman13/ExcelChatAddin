@@ -118,6 +118,20 @@ namespace ExcelChatAddin
             return false;
         }
 
+        private bool EnsureMaskingDataDirConfigured()
+        {
+            if (Paths.IsMaskingDataDirConfigured) return true;
+
+            MessageBox.Show(
+                "環境変数 OFFICE_MASKING_DATA_DIR が未設定です。\n"
+                + "Secure Chat を開く前に設定してください。",
+                "Secure Chat",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+
+            return false;
+        }
+
         private void AddMaskManageMenu()
         {
             try
@@ -949,6 +963,7 @@ namespace ExcelChatAddin
 
         public void ShowChat()
         {
+            if (!EnsureMaskingDataDirConfigured()) return;
             if (!EnsureMaskingAvailable("Secure Chat")) return;
 
             try

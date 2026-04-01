@@ -18,8 +18,7 @@ namespace OfficeMasking.Core
 
         private string RulesPath => MaskingPaths.RulesPath;
         private string LegacyRulesPath => MaskingPaths.LegacyRulesPath;
-        private string RulesBackupPath1 => RulesPath + ".bak1";
-        private string RulesBackupPath2 => RulesPath + ".bak2";
+        private const int MaxBackupGenerations = 50;
 
         public static MaskingEngine Instance => _instance ?? (_instance = new MaskingEngine());
 
@@ -141,7 +140,7 @@ namespace OfficeMasking.Core
             throw new InvalidOperationException(_loadFailureMessage ?? "マスキング辞書を読み込めないため保存できません。");
         }
 
-        private void SaveRules()
+        private void SaveRules([System.Runtime.CompilerServices.CallerMemberName] string caller = null)
         {
             EnsureAvailableForWrite();
 
@@ -150,7 +149,7 @@ namespace OfficeMasking.Core
                 MaskingPaths.EnsureDataDir();
                 string json = JsonConvert.SerializeObject(_maskDb, Formatting.Indented);
                 File.WriteAllText(RulesPath, json);
-                _logger.LogInfo($"Saved masking rules: path='{RulesPath}', count={_maskDb.Count}");
+                _logger.LogInfo($"Saved masking rules: path='{RulesPath}', count={_maskDb.Count}, caller={caller}");
             }
             catch (Exception ex)
             {
@@ -168,10 +167,9 @@ namespace OfficeMasking.Core
             try
             {
                 MaskingPaths.EnsureDataDir();
-                if (!File.Exists(RulesPath) && File.Exists(LegacyRulesPath))
-                {
-                    File.Copy(LegacyRulesPath, RulesPath);
-                }
+
+                // 削除された場合のみバックアップから復元
+                TryRestoreDeletedRulesFromBackup();
 
                 BackupRulesOnStartup();
 
@@ -193,30 +191,19 @@ namespace OfficeMasking.Core
                     throw new InvalidDataException("rules.json を辞書形式として読み込めませんでした。");
                 }
 
-                bool needsMigration = false;
-                var migratedDict = new Dictionary<string, string>();
-
+                // 旧形式はエラーにする（起動時自動変換・上書き禁止）
                 foreach (var kvp in dict)
                 {
                     if (kvp.Value != null && kvp.Value.StartsWith("[") && kvp.Value.EndsWith("]"))
                     {
-                        string newPlaceholder = "__" + kvp.Value.Trim('[', ']') + "__";
-                        migratedDict.Add(kvp.Key, newPlaceholder);
-                        needsMigration = true;
-                    }
-                    else
-                    {
-                        migratedDict.Add(kvp.Key, kvp.Value);
+                        throw new InvalidDataException(
+                            "旧形式プレースホルダー([..]) を検出しました。自動変換・上書きは行いません。\n"
+                            + "手動で [XXX] を __XXX__ 形式に変換してください。");
                     }
                 }
 
-                _maskDb = migratedDict;
+                _maskDb = new Dictionary<string, string>(dict);
                 _logger.LogInfo($"Loaded masking rules: path='{RulesPath}', count={_maskDb.Count}");
-
-                if (needsMigration)
-                {
-                    SaveRules();
-                }
             }
             catch (Exception ex)
             {
@@ -226,8 +213,30 @@ namespace OfficeMasking.Core
                     "マスキング辞書の読み込みに失敗しました。\n"
                     + $"ファイル: {RulesPath}\n"
                     + $"詳細: {ex.Message}\n"
-                    + $"起動時バックアップ: {RulesBackupPath1}, {RulesBackupPath2}";
+                    + $"起動時バックアップ: {RulesPath}.bak1 ～ {RulesPath}.bak{MaxBackupGenerations}";
                 _logger.LogException(ex, $"Failed to load masking rules: path='{RulesPath}'");
+            }
+        }
+
+        private void TryRestoreDeletedRulesFromBackup()
+        {
+            if (File.Exists(RulesPath)) return;
+
+            for (int i = 1; i <= MaxBackupGenerations; i++)
+            {
+                string bak = $"{RulesPath}.bak{i}";
+                if (!File.Exists(bak)) continue;
+
+                try
+                {
+                    File.Copy(bak, RulesPath, overwrite: false);
+                    _logger.LogInfo($"Restored rules from backup: '{bak}' -> '{RulesPath}'");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogException(ex, $"Failed to restore rules from backup: '{bak}'");
+                }
+                return;
             }
         }
 
@@ -237,11 +246,17 @@ namespace OfficeMasking.Core
             {
                 if (!File.Exists(RulesPath)) return;
 
-                if (File.Exists(RulesBackupPath2)) File.Delete(RulesBackupPath2);
-                if (File.Exists(RulesBackupPath1)) File.Move(RulesBackupPath1, RulesBackupPath2);
-                File.Copy(RulesPath, RulesBackupPath1, true);
+                // 古い世代をシフト（50世代保持）
+                for (int i = MaxBackupGenerations; i >= 2; i--)
+                {
+                    string dst = $"{RulesPath}.bak{i}";
+                    string src = $"{RulesPath}.bak{i - 1}";
+                    if (File.Exists(dst)) File.Delete(dst);
+                    if (File.Exists(src)) File.Move(src, dst);
+                }
 
-                _logger.LogInfo($"Backed up masking rules on startup: src='{RulesPath}', bak1='{RulesBackupPath1}', bak2='{RulesBackupPath2}'");
+                File.Copy(RulesPath, $"{RulesPath}.bak1", true);
+                _logger.LogInfo($"Backed up masking rules on startup: path='{RulesPath}', generations={MaxBackupGenerations}");
             }
             catch (Exception ex)
             {

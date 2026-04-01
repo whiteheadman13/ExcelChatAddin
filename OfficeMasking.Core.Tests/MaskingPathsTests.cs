@@ -124,5 +124,19 @@ namespace OfficeMasking.Core.Tests
         {
             Assert.AreEqual("OfficeChatMasking", MaskingPaths.DefaultFolderName);
         }
+
+        [TestMethod]
+        public void IsDataDirEnvironmentConfigured_TrueWhenEnvSet()
+        {
+            Environment.SetEnvironmentVariable("OFFICE_MASKING_DATA_DIR", @"C:\MaskData");
+            Assert.IsTrue(MaskingPaths.IsDataDirEnvironmentConfigured);
+        }
+
+        [TestMethod]
+        public void IsDataDirEnvironmentConfigured_FalseWhenEnvMissing()
+        {
+            Environment.SetEnvironmentVariable("OFFICE_MASKING_DATA_DIR", null);
+            Assert.IsFalse(MaskingPaths.IsDataDirEnvironmentConfigured);
+        }
     }
 }

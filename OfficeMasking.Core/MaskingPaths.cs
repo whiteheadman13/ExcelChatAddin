@@ -24,6 +24,12 @@ namespace OfficeMasking.Core
         /// </summary>
         public static string LegacyDllDirectory { get; set; }
 
+        /// <summary>
+        /// 環境変数 OFFICE_MASKING_DATA_DIR が設定されているかどうか。
+        /// </summary>
+        public static bool IsDataDirEnvironmentConfigured
+            => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(EnvVarName));
+
         public static string AppDataDir
             => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
@@ -82,6 +88,9 @@ namespace OfficeMasking.Core
                 Directory.CreateDirectory(DataDir);
             }
 
+            // 環境変数指定時は自動移行しない（意図しない上書き防止）
+            if (IsDataDirEnvironmentConfigured) return;
+
             TryMigrateFromLegacyAppData();
             TryMigrateFromLegacyDll();
         }
@@ -95,7 +104,8 @@ namespace OfficeMasking.Core
 
                 if (!Directory.Exists(LegacyDataDir)) return;
 
-                if (File.Exists(RulesPath) || File.Exists(CategoriesPath) || File.Exists(ConfigPath))
+                // 3つ全てそろっている場合のみスキップ（config.jsonだけで止めない）
+                if (File.Exists(RulesPath) && File.Exists(CategoriesPath) && File.Exists(ConfigPath))
                     return;
 
                 CopyIfExists(Path.Combine(LegacyDataDir, "rules.json"), RulesPath);

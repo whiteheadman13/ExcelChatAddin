@@ -188,16 +188,19 @@ namespace OfficeMasking.Core.Tests
         }
 
         [TestMethod]
-        public void LoadRules_MigratesOldBracketFormat()
+        public void LoadRules_OldBracketFormat_SetsUnavailable_AndDoesNotOverwrite()
         {
+            var path = Path.Combine(_tempDir, "rules.json");
             var data = new Dictionary<string, string> { { "旧形式", "[LEGACY_1]" } };
-            File.WriteAllText(Path.Combine(_tempDir, "rules.json"),
-                JsonConvert.SerializeObject(data, Formatting.Indented));
+            var originalJson = JsonConvert.SerializeObject(data, Formatting.Indented);
+            File.WriteAllText(path, originalJson);
 
             MaskingEngine.ResetInstance();
+            var _ = MaskingEngine.Instance;
 
-            var rules = MaskingEngine.Instance.GetAllRules();
-            Assert.AreEqual("__LEGACY_1__", rules["旧形式"]);
+            Assert.IsFalse(MaskingEngine.Instance.IsAvailable);
+            // ファイルが上書きされていないことを確認
+            Assert.AreEqual(originalJson, File.ReadAllText(path));
         }
 
         [TestMethod]
@@ -241,6 +244,40 @@ namespace OfficeMasking.Core.Tests
             MaskingEngine.SetLogger(null);
             // 例外が出なければOK
             MaskingEngine.Instance.AddRule("ログテスト", "LOG");
+        }
+
+        [TestMethod]
+        public void BackupRules_Keeps50Generations()
+        {
+            var rulesPath = Path.Combine(_tempDir, "rules.json");
+
+            for (int i = 1; i <= 55; i++)
+            {
+                var data = new Dictionary<string, string> { { "k" + i, "__V_" + i + "__" } };
+                File.WriteAllText(rulesPath, JsonConvert.SerializeObject(data, Formatting.Indented));
+                MaskingEngine.ResetInstance();
+                var _ = MaskingEngine.Instance;
+            }
+
+            Assert.IsTrue(File.Exists(rulesPath + ".bak1"));
+            Assert.IsTrue(File.Exists(rulesPath + ".bak50"));
+            Assert.IsFalse(File.Exists(rulesPath + ".bak51"));
+        }
+
+        [TestMethod]
+        public void LoadRules_WhenRulesDeleted_RestoresFromBak1()
+        {
+            var rulesPath = Path.Combine(_tempDir, "rules.json");
+            var bak1Path = rulesPath + ".bak1";
+
+            var data = new Dictionary<string, string> { { "復元", "__RESTORE_1__" } };
+            File.WriteAllText(bak1Path, JsonConvert.SerializeObject(data, Formatting.Indented));
+
+            MaskingEngine.ResetInstance();
+            var rules = MaskingEngine.Instance.GetAllRules();
+
+            Assert.IsTrue(File.Exists(rulesPath));
+            Assert.AreEqual("__RESTORE_1__", rules["復元"]);
         }
     }
 }

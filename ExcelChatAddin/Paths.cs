@@ -28,6 +28,8 @@ namespace ExcelChatAddin
 
         public static string LegacyRulesPath => MaskingPaths.LegacyRulesPath;
 
+        public static bool IsMaskingDataDirConfigured => MaskingPaths.IsDataDirEnvironmentConfigured;
+
         // ── Excel 固有パス ──
 
         public static string TemplatesPath
