@@ -34,6 +34,13 @@ namespace ExcelChatAddin
         public int DataStartRow { get; set; } = 2;
         public string ValuePolicy { get; set; } = "strict";
         public string KeyColumnLetter { get; set; } = "A";
+
+        /// <summary>
+        /// マトリクス表示時に主キーの隣に表示するサブキー列（任意）。
+        /// 例: "B" → 行/列ラベルが「主キー値 [B列値]」形式になる。
+        /// </summary>
+        public string DisplayColumnLetter { get; set; } = "";
+
         public List<IssueSchemaColumn> Columns { get; set; } = new List<IssueSchemaColumn>();
         public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 

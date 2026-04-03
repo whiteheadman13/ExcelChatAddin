@@ -3,6 +3,30 @@
 このファイルは修正開始前に必ず参照する前提の一覧です。
 以後の変更では、対象機能に関連するモジュールをこの一覧で先に確認します。
 
+## Session Update (関係設定: MDM風一覧編集の初期実装)
+- 事象:
+  1. 同一/異種テーブル間の関係を別表で管理したい
+  2. 関係種別マスタを独自定義で管理したい
+  3. 人が入力・分析しやすいMDM風の一覧編集UIが必要
+- 修正内容:
+  1. `TableRelationConfig` を新規作成（関係種別マスタ/テーブル間関係ルール/レコード間関係の保存モデルとLoad/Save/Normalize/検証）
+  2. TSV一括貼付パーサを追加（列順: 元テーブル,元キー,先テーブル,先キー,関係種別コード,意味,備考,疎結合化,有効）
+  3. 自己参照禁止・物理削除・テーブル間ルール許可チェック・関係種別マスタ整合チェックを実装
+  4. `TableRelationSettingsDialog` を新規作成（関係種別マスタ/テーブル間関係ルール/関係一覧の3タブ編集UI）
+  5. `Paths` に `TableRelationsPath` を追加
+  6. `ChatRibbon` に「関係設定」ボタンを追加
+  7. `ThisAddIn` に `ShowTableRelationSettings()` を追加
+  8. `table_relations.json` 保存時にバックアップローテーション（最大50世代）を追加
+  9. 保存先を分離（メタ情報=JSON、実データ=Excelシート「関係データ」）。WinFormsはExcelシートを読み書きし、未作成時は自動作成
+- 対象モジュール（新規）:
+  - `ExcelChatAddin/TableRelationConfig.cs`
+  - `ExcelChatAddin/TableRelationSettingsDialog.cs`
+- 対象モジュール（変更）:
+  - `ExcelChatAddin/Paths.cs`
+  - `ExcelChatAddin/ChatRibbon.cs`
+  - `ExcelChatAddin/ThisAddIn.cs`
+  - `ExcelChatAddin/ExcelChatAddin.csproj`
+
 ## Session Update (MaskingRulesStore: 保存ロジック集約・更新時バックアップ)
 - 事象:
   1. MaskingEngine に保存・バックアップ・復元・読込ロジックが混在し責務が大きすぎた
@@ -308,8 +332,6 @@
 
 ## Session Update (チャットプレビュー画面からの用語登録)
 - 事象: チャットのマスキング確認プレビュー画面から、選択語を直接用語登録したい。
-- 参照元:
-  - `C:\Users\Masay\source\repos\powerpoint_masking2\docs\メソッド一覧.md`
 - 修正内容:
   1. `MaskPreviewWindow` に「選択語を登録」ボタンを追加
   2. プレビュー内選択テキストで `RegisterDialog` を開いて辞書登録できるようにする

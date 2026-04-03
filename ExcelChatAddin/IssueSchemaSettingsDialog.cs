@@ -17,6 +17,7 @@ namespace ExcelChatAddin
         private NumericUpDown _numHeaderRow;
         private NumericUpDown _numDataStartRow;
         private TextBox _txtSplittingPolicy;
+        private TextBox _txtDisplayColumnLetter;
         private DataGridView _grid;
 
         public IssueSchemaSettingsDialog(Excel.Application app)
@@ -34,8 +35,9 @@ namespace ExcelChatAddin
             Size = new Size(1100, 760);
             StartPosition = FormStartPosition.CenterParent;
 
-            var top = new Panel { Dock = DockStyle.Top, Height = 88 };
+            var top = new Panel { Dock = DockStyle.Top, Height = 100 };
 
+            // 1行目: テーブル名 / ヘッダー行 / データ開始行 / 値候補ポリシー
             top.Controls.Add(new Label { Text = "対象テーブル名:", AutoSize = true, Location = new Point(12, 14) });
             _cmbTableName = new ComboBox
             {
@@ -47,12 +49,12 @@ namespace ExcelChatAddin
             PopulateTableNames();
             _cmbTableName.SelectedIndexChanged += CmbTableName_SelectedIndexChanged;
 
-            top.Controls.Add(new Label { Text = "ヘッダー行:", AutoSize = true, Location = new Point(330, 14) });
-            _numHeaderRow = new NumericUpDown { Location = new Point(400, 10), Width = 80, Minimum = 1, Maximum = 100000, Value = 1 };
+            top.Controls.Add(new Label { Text = "ヘッダー行:", AutoSize = true, Location = new Point(340, 14) });
+            _numHeaderRow = new NumericUpDown { Location = new Point(410, 10), Width = 60, Minimum = 1, Maximum = 100000, Value = 1 };
             top.Controls.Add(_numHeaderRow);
 
-            top.Controls.Add(new Label { Text = "データ開始行:", AutoSize = true, Location = new Point(500, 14) });
-            _numDataStartRow = new NumericUpDown { Location = new Point(585, 10), Width = 80, Minimum = 1, Maximum = 100000, Value = 2 };
+            top.Controls.Add(new Label { Text = "データ開始行:", AutoSize = true, Location = new Point(480, 14) });
+            _numDataStartRow = new NumericUpDown { Location = new Point(560, 10), Width = 60, Minimum = 1, Maximum = 100000, Value = 2 };
             top.Controls.Add(_numDataStartRow);
 
             top.Controls.Add(new Label
@@ -60,16 +62,29 @@ namespace ExcelChatAddin
                 Text = "値候補ポリシー: strict（固定）",
                 AutoSize = true,
                 ForeColor = Color.DarkBlue,
-                Location = new Point(700, 14)
+                Location = new Point(640, 14)
             });
 
+            // 2行目: 表示列（関係マトリクス）
+            top.Controls.Add(new Label { Text = "表示列(関係マトリクス):", AutoSize = true, Location = new Point(12, 44) });
+            _txtDisplayColumnLetter = new TextBox { Location = new Point(155, 40), Width = 50 };
+            top.Controls.Add(_txtDisplayColumnLetter);
+            top.Controls.Add(new Label
+            {
+                Text = "※主キー以外にマトリクスの行/列ラベルに表示するサブキー列(任意。例: B)",
+                AutoSize = true,
+                Location = new Point(215, 44),
+                ForeColor = Color.DarkGray
+            });
+
+            // 3行目: 保存先
             top.Controls.Add(new Label
             {
                 Text = "保存先: " + Paths.TableSchemaPath,
                 AutoSize = false,
                 Width = 1050,
-                Height = 24,
-                Location = new Point(12, 50)
+                Height = 20,
+                Location = new Point(12, 72)
             });
 
             _grid = new DataGridView
@@ -269,6 +284,7 @@ namespace ExcelChatAddin
                 _numHeaderRow.Value = Math.Max(1, cfg.HeaderRow);
                 _numDataStartRow.Value = Math.Max(1, cfg.DataStartRow);
                 _txtSplittingPolicy.Text = cfg.SplittingPolicy ?? "";
+                _txtDisplayColumnLetter.Text = cfg.DisplayColumnLetter ?? "";
 
                 // 差分マージ: Excelヘッダー情報がある場合
                 var mergedColumns = MergeColumnsWithExcel(cfg.Columns, excelColumns);
@@ -583,6 +599,7 @@ namespace ExcelChatAddin
                     DataStartRow = dataStartRow,
                     ValuePolicy = "strict",
                     KeyColumnLetter = keyCols[0].ColumnLetter,
+                    DisplayColumnLetter = (_txtDisplayColumnLetter.Text ?? "").Trim().ToUpperInvariant().Replace("$", ""),
                     Columns = cols,
                     SplittingPolicy = (_txtSplittingPolicy.Text ?? "").Trim()
                 };

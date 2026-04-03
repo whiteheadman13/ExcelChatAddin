@@ -238,6 +238,11 @@
     <Compile Include="SchemaTemplateTableNameDialog.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="TableRelationConfig.cs" />
+    <Compile Include="TableRelationMatrixForm.cs" />
+    <Compile Include="TableRelationSettingsDialog.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="TaskPaneHost.cs">
       <SubType>UserControl</SubType>
     </Compile>

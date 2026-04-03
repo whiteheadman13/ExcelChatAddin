@@ -42,6 +42,9 @@ namespace ExcelChatAddin
         public static string TableSchemaPath
             => Path.Combine(DataDir, "table_schema.json");
 
+        public static string TableRelationsPath
+            => Path.Combine(DataDir, "table_relations.json");
+
         // 旧名（後方互換）
         public static string IssueSchemaPath
             => Path.Combine(DataDir, "issue_schema.json");

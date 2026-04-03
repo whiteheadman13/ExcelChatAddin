@@ -624,6 +624,22 @@ namespace ExcelChatAddin
             ShowTableSchemaSettings();
         }
 
+        public void ShowTableRelationSettings()
+        {
+            try
+            {
+                var owner = new Win32Window(new IntPtr(this.Application.Hwnd));
+                using (var dlg = new TableRelationSettingsDialog(this.Application))
+                {
+                    dlg.ShowDialog(owner);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "関係設定");
+            }
+        }
+
         public void ShowSchemaTemplateInsert()
         {
             try
