@@ -24,6 +24,27 @@ namespace ExcelChatAddin
         private string _lastGeminiResponse = "";
         private string _lastSentRawInput = "";
 
+        // 選択肢に出す Gemini モデル（静的）。
+        private static readonly string[] GeminiModels =
+        {
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3-flash-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-2.5-pro",
+        };
+        // ローカル(ollama)モデル名の集合。/api/tags から動的取得し、
+        // ここに含まれるモデルを選んだときは Local 経路（マスキングなし）で送信する。
+        private readonly HashSet<string> _localModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // 現在の画面履歴に Local 由来（生データ）の吹き出しが含まれるか。
+        // true の間は Gemini への送信をブロックする（生データの外部漏洩防止）。
+        private bool _historyContainsLocal = false;
+        // モデルコンボの再構築中に SelectionChanged の副作用を抑止するフラグ。
+        private bool _suppressModelChange = false;
+
+        // 現在選択中のモデルが Local（ollama）か。
+        private bool IsLocalModel(string model)
+            => !string.IsNullOrEmpty(model) && _localModels.Contains(model);
+
         private TaskPaneHost _host;
         // 範囲の送信マッピング（セッション内で重複送信を避けるため）
         private readonly Dictionary<string, string> _rangeRefMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -451,9 +472,11 @@ namespace ExcelChatAddin
         }
 
         // Convert TSV (tab-separated) text into a Markdown table string.
-        // Applies MaskingEngine.Instance.Mask to each cell to preserve masking rules.
-        private string TsvToMarkdownTable(string tsv)
+        // applyMask=true のとき各セルに MaskingEngine.Mask を適用（Gemini向け）。
+        // applyMask=false のときはマスクせず生データを返す（ローカルLLM向け）。
+        private string TsvToMarkdownTable(string tsv, bool applyMask = true)
         {
+            string M(string s) => applyMask ? MaskingEngine.Instance.Mask(s ?? "") : (s ?? "");
             if (string.IsNullOrWhiteSpace(tsv)) return "(空の範囲)";
 
             var lines = tsv.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
@@ -472,14 +495,14 @@ namespace ExcelChatAddin
             string[] header = new string[cols];
             if (firstIsHeader)
             {
-                for (int c = 0; c < cols; c++) header[c] = c < rows[0].Length ? MaskingEngine.Instance.Mask(rows[0][c] ?? "") : "";
+                for (int c = 0; c < cols; c++) header[c] = c < rows[0].Length ? M(rows[0][c]) : "";
                 // body starts from row 1
                 sb.AppendLine("| " + string.Join(" | ", header) + " |");
                 sb.AppendLine("|" + string.Join("|", Enumerable.Range(0, cols).Select(_ => " --- ")) + "|");
                 for (int r = 1; r < rows.Count; r++)
                 {
                     var cells = new string[cols];
-                    for (int c = 0; c < cols; c++) cells[c] = c < rows[r].Length ? MaskingEngine.Instance.Mask(rows[r][c] ?? "") : "";
+                    for (int c = 0; c < cols; c++) cells[c] = c < rows[r].Length ? M(rows[r][c]) : "";
                     sb.AppendLine("| " + string.Join(" | ", cells) + " |");
                 }
             }
@@ -492,7 +515,7 @@ namespace ExcelChatAddin
                 for (int r = 0; r < rows.Count; r++)
                 {
                     var cells = new string[cols];
-                    for (int c = 0; c < cols; c++) cells[c] = c < rows[r].Length ? MaskingEngine.Instance.Mask(rows[r][c] ?? "") : "";
+                    for (int c = 0; c < cols; c++) cells[c] = c < rows[r].Length ? M(rows[r][c]) : "";
                     sb.AppendLine("| " + string.Join(" | ", cells) + " |");
                 }
             }
@@ -519,6 +542,9 @@ namespace ExcelChatAddin
 
                 RefreshSheetList();
 
+                // モデル選択（Gemini静的＋ローカル動的）の初期化
+                InitModelCombo();
+
                 // 初期プレビュー
                 RenderPreview();
             };
@@ -529,6 +555,20 @@ namespace ExcelChatAddin
             {
                 var raw = InputBox.Text ?? "";
                 if (string.IsNullOrWhiteSpace(raw)) return;
+
+                bool isLocal = IsLocalModel(_selectedModel);
+
+                // Local 由来（マスキングなし）の生データが履歴にある状態での Gemini 送信はブロック。
+                // 生データが無加工で外部に漏れるのを物理的に防ぐ（履歴クリアまで送信不可）。
+                if (!isLocal && _historyContainsLocal)
+                {
+                    MessageBox.Show(
+                        "チャット履歴にローカルLLM（マスキングなし）の生データが含まれています。\n" +
+                        "Gemini に送信する前に「クリア履歴」で履歴をクリアしてください。",
+                        "送信できません（マスキングなしデータの混在）",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
 
                 var app = Globals.ThisAddIn.Application;
 
@@ -552,7 +592,7 @@ namespace ExcelChatAddin
                     ? $"{rng.Worksheet.Name}!{rng.Address[false, false]}"
                     : "(なし)";
 
-                var payload = BuildMaskedPayload(raw, rangeLabel, rangeText, true);
+                var payload = BuildMaskedPayload(raw, rangeLabel, rangeText, true, applyMask: !isLocal);
 
                 // NOTE: table request for this send is controlled by the input-area checkbox (_requestTableForNextSend).
 
@@ -592,30 +632,68 @@ namespace ExcelChatAddin
                     chkRequestTable.IsChecked = false;
                 }
 
-                var masked = MaskingEngine.Instance.Mask(payload);
-                // 送信済みの range マップは継続する（セッション内）。
-                // 今回は payload 自体は既に BuildMaskedPayload 内でマスク済みなので再度 Mask は不要,
-                // ただし保険として再マスクしておく。
+                // Local 送信では「You」吹き出し（生の入力）が既に履歴に載っている。
+                // 送信が失敗しても生データは履歴に残るため、送信前にブロック対象としてマークする。
+                if (isLocal) _historyContainsLocal = true;
 
-                var client = new GeminiClient();
-                DebugLogger.LogInfo("Sending to Gemini...");
-                var response = await client.SendAsync(masked, _selectedModel);
-                DebugLogger.LogInfo("Received response from Gemini (raw length: " + (response?.Length ?? 0) + ")");
+                string unmaskedResponse;
+                Func<string, Task<string>> sendForValidation;
 
-                // 受信したレスポンスをアンマスクしてから表示する
-                var unmaskedResponse = MaskingEngine.Instance.Unmask(response);
-                _lastGeminiResponse = unmaskedResponse ?? "";
-
-                Dispatcher.Invoke(() =>
+                if (isLocal)
                 {
-                    // 回答待ちインジケータを削除
-                    RemoveLastSystemIndicator();
+                    // ── ローカルLLM経路（マスキングなし・生データ送信） ──
+                    var baseUrl = AddinConfig.GetOllamaBaseUrl();
+                    bool allowMarkdown = payload.IndexOf("Markdown", StringComparison.OrdinalIgnoreCase) >= 0;
+                    var sysInstr = BuildLocalSystemInstruction(allowMarkdown);
+                    var ollama = new OllamaClient();
 
-                    AppendChat("Gemini", unmaskedResponse, raw);
-                });
+                    DebugLogger.LogInfo("Sending to local LLM (ollama)...");
+                    // 失敗時は OllamaClient が明確な例外を投げる（フォールバック無し）
+                    unmaskedResponse = await ollama.SendAsync(_selectedModel, payload, sysInstr, baseUrl);
+                    _lastGeminiResponse = unmaskedResponse ?? "";
+
+                    Dispatcher.Invoke(() =>
+                    {
+                        RemoveLastSystemIndicator();
+                        AppendChat("Local", unmaskedResponse, raw);
+                    });
+
+                    // 検証ループ：ローカルはマスクせず素のプロンプト/応答を使う
+                    sendForValidation = async prompt =>
+                        await ollama.SendAsync(_selectedModel, prompt, sysInstr, baseUrl);
+                }
+                else
+                {
+                    // ── Gemini経路（マスキングあり） ──
+                    var masked = MaskingEngine.Instance.Mask(payload);
+                    // 今回は payload 自体は既に BuildMaskedPayload 内でマスク済みだが保険として再マスク。
+
+                    var client = new GeminiClient();
+                    DebugLogger.LogInfo("Sending to Gemini...");
+                    var response = await client.SendAsync(masked, _selectedModel);
+                    DebugLogger.LogInfo("Received response from Gemini (raw length: " + (response?.Length ?? 0) + ")");
+
+                    // 受信したレスポンスをアンマスクしてから表示する
+                    unmaskedResponse = MaskingEngine.Instance.Unmask(response);
+                    _lastGeminiResponse = unmaskedResponse ?? "";
+
+                    Dispatcher.Invoke(() =>
+                    {
+                        RemoveLastSystemIndicator();
+                        AppendChat("Gemini", unmaskedResponse, raw);
+                    });
+
+                    // 検証ループ：Gemini はマスク→送信→アンマスク
+                    sendForValidation = async prompt =>
+                    {
+                        var m = MaskingEngine.Instance.Mask(prompt);
+                        var r = await client.SendAsync(m, _selectedModel);
+                        return MaskingEngine.Instance.Unmask(r);
+                    };
+                }
 
                 // ★ 更新対象テーブル選択時: 検証→修正ループ（最大3回）
-                var validatedJson = await RunValidationLoopAsync(client, raw, unmaskedResponse);
+                var validatedJson = await RunValidationLoopAsync(sendForValidation, raw, unmaskedResponse);
                 if (validatedJson != null)
                 {
                     // 最終JSONで上書き（反映時にこちらが使われる）
@@ -641,7 +719,7 @@ namespace ExcelChatAddin
                     _selectedUpdateTable = null;
                     if (cmbUpdateTarget != null && cmbUpdateTarget.Items.Count > 0)
                         cmbUpdateTarget.SelectedIndex = 0;
-                    MessageBox.Show(ex.Message, "Gemini送信エラー");
+                    MessageBox.Show(ex.Message, "送信エラー");
                 });
             }
         }
@@ -668,7 +746,7 @@ namespace ExcelChatAddin
         /// 更新対象テーブル選択時に、生成済みJSONを検証→修正するループを実行する。
         /// 未選択時は null を返す（呼び出し側は従来フローを維持）。
         /// </summary>
-        private async Task<string> RunValidationLoopAsync(GeminiClient client, string rawUserInput, string firstResponse)
+        private async Task<string> RunValidationLoopAsync(Func<string, Task<string>> sendAndUnmask, string rawUserInput, string firstResponse)
         {
             // 更新対象テーブル未選択なら何もしない
             if (string.IsNullOrWhiteSpace(_selectedUpdateTable)) return null;
@@ -713,11 +791,8 @@ namespace ExcelChatAddin
                     var prompt = ContentValidator.BuildValidationPrompt(
                         rawUserInput, currentJson, schema, existingData);
 
-                    var maskedPrompt = MaskingEngine.Instance.Mask(prompt);
-
-                    // LLM呼び出し
-                    var validationResponse = await client.SendAsync(maskedPrompt, _selectedModel);
-                    var unmaskedValidation = MaskingEngine.Instance.Unmask(validationResponse);
+                    // LLM呼び出し（マスク/アンマスクの有無は呼び出し側のデリゲートに委ねる）
+                    var unmaskedValidation = await sendAndUnmask(prompt);
 
                     // パース
                     var result = ContentValidator.ParseValidationResponse(unmaskedValidation);
@@ -1000,6 +1075,7 @@ namespace ExcelChatAddin
             headerPanel.Children.Add(copyBtn);
 
             if (string.Equals(role, "Gemini", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(role, "Local", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(role, "Validator", StringComparison.OrdinalIgnoreCase))
             {
                 var applyBtn = new Button
@@ -1194,6 +1270,8 @@ namespace ExcelChatAddin
                 _rangeRefMap.Clear();
                 _nextRangeId = 1;
                 _refsSent.Clear();
+                // Local 由来の生データも消えたので Gemini 送信ブロックを解除
+                _historyContainsLocal = false;
                 // 履歴をクリアしたら、選択フェールバック（Selection/ActiveCell による補完）も抑止する
                 _suppressSelectionFallback = true;
             }
@@ -1263,8 +1341,10 @@ namespace ExcelChatAddin
         // Build masked payload using mapping strategy A
         // commitMapping: true when actually sending (will persist mapping and mark refs as sent)
         //                false when previewing (do not mutate persistent state)
-        private string BuildMaskedPayload(string rawInput, string rangeLabel, string rangeText, bool commitMapping = true)
+        private string BuildMaskedPayload(string rawInput, string rangeLabel, string rangeText, bool commitMapping = true, bool applyMask = true)
         {
+            // applyMask=false（ローカルLLM）のときはマスキングせず生データを通す。
+            string M(string s) => applyMask ? MaskingEngine.Instance.Mask(s ?? "") : (s ?? "");
             var sb = new StringBuilder();
 
             // use working map so preview does not mutate persistent state
@@ -1358,13 +1438,13 @@ namespace ExcelChatAddin
                     // Convert range text (TSV) to a Markdown table with cell-level masking so LLM receives structured table data
                     try
                     {
-                        var md = TsvToMarkdownTable(rt);
+                        var md = TsvToMarkdownTable(rt, applyMask);
                         sb.AppendLine(md);
                     }
                     catch
                     {
-                        // fallback to masked raw text
-                        sb.AppendLine(MaskingEngine.Instance.Mask(rt));
+                        // fallback to (masked) raw text
+                        sb.AppendLine(M(rt));
                     }
                     sb.AppendLine();
                 }
@@ -1415,7 +1495,7 @@ namespace ExcelChatAddin
                 }
             }
             sb.AppendLine("【チャット履歴（参考）】");
-            sb.AppendLine(string.IsNullOrWhiteSpace(historyWithRefs) ? "(なし)" : MaskingEngine.Instance.Mask(historyWithRefs));
+            sb.AppendLine(string.IsNullOrWhiteSpace(historyWithRefs) ? "(なし)" : M(historyWithRefs));
             sb.AppendLine();
 
             // 3) input body: replace inline ranges/tables with refs if mapped
@@ -1441,7 +1521,7 @@ namespace ExcelChatAddin
             }
 
             sb.AppendLine("【入力】");
-            sb.AppendLine(MaskingEngine.Instance.Mask(bodyWithRefs));
+            sb.AppendLine(M(bodyWithRefs));
             sb.AppendLine();
 
             // 4) target range: only include if it appears among referenced keys (i.e. present in chat history or input)
@@ -1455,7 +1535,7 @@ namespace ExcelChatAddin
                 }
                 else
                 {
-                    sb.AppendLine(MaskingEngine.Instance.Mask(rangeLabel));
+                    sb.AppendLine(M(rangeLabel));
                 }
             }
             else
@@ -1958,17 +2038,153 @@ namespace ExcelChatAddin
             _requestTableForNextSend = false;
         }
 
-        private void CmbModel_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        // ── モデル選択（Gemini静的 ＋ ローカル動的） ──
+
+        // 起動時：config から前回モデルを復元し、Gemini のみで一旦構築 → 非同期で /api/tags を取得。
+        private void InitModelCombo()
+        {
+            var last = AddinConfig.GetLastModel();
+            if (!string.IsNullOrWhiteSpace(last)) _selectedModel = last;
+            RebuildModelCombo();
+            _ = RefreshModelListAsync();
+        }
+
+        // /api/tags を叩いてローカルモデル一覧を更新し、コンボを再構築する。
+        private async Task RefreshModelListAsync()
         {
             try
             {
-                var cb = cmbModel.SelectedItem as ComboBoxItem;
-                if (cb != null && cb.Tag != null)
+                var baseUrl = AddinConfig.GetOllamaBaseUrl();
+                var client = new OllamaClient();
+                var models = await client.GetModelsAsync(baseUrl);
+                Dispatcher.Invoke(() =>
                 {
-                    _selectedModel = cb.Tag.ToString();
+                    _localModels.Clear();
+                    foreach (var m in models) _localModels.Add(m);
+                    RebuildModelCombo();
+                });
+            }
+            catch (Exception ex)
+            {
+                DebugLogger.LogException(ex, "RefreshModelListAsync");
+            }
+        }
+
+        // コンボを Gemini グループ ＋（あれば）ローカルグループで作り直す。
+        private void RebuildModelCombo()
+        {
+            if (cmbModel == null) return;
+            _suppressModelChange = true;
+            try
+            {
+                cmbModel.Items.Clear();
+
+                cmbModel.Items.Add(MakeHeaderItem("── Gemini（マスキングあり） ──"));
+                foreach (var g in GeminiModels)
+                    cmbModel.Items.Add(MakeModelItem(g));
+
+                if (_localModels.Count > 0)
+                {
+                    cmbModel.Items.Add(new Separator());
+                    cmbModel.Items.Add(MakeHeaderItem("── ローカル（マスキングなし） ──"));
+                    foreach (var l in _localModels)
+                        cmbModel.Items.Add(MakeModelItem(l));
+                }
+
+                SelectModelInCombo(_selectedModel);
+            }
+            finally { _suppressModelChange = false; }
+            UpdateLocalIndicator();
+        }
+
+        private static ComboBoxItem MakeModelItem(string name)
+            => new ComboBoxItem { Content = name, Tag = name };
+
+        // 選択不可のグループ見出し（Tag=null なので選んでも _selectedModel は変わらない）。
+        private static ComboBoxItem MakeHeaderItem(string text)
+            => new ComboBoxItem { Content = text, Tag = null, IsEnabled = false, FontWeight = FontWeights.Bold };
+
+        // 指定モデル名の項目を選択する。見つからなければ先頭の Gemini にフォールバック。
+        private void SelectModelInCombo(string model)
+        {
+            foreach (var obj in cmbModel.Items)
+            {
+                if (obj is ComboBoxItem ci && ci.Tag != null
+                    && string.Equals(ci.Tag.ToString(), model, StringComparison.Ordinal))
+                {
+                    cmbModel.SelectedItem = ci;
+                    return;
                 }
             }
+            _selectedModel = GeminiModels[0];
+            foreach (var obj in cmbModel.Items)
+            {
+                if (obj is ComboBoxItem ci && ci.Tag != null
+                    && string.Equals(ci.Tag.ToString(), _selectedModel, StringComparison.Ordinal))
+                {
+                    cmbModel.SelectedItem = ci;
+                    return;
+                }
+            }
+        }
+
+        private void CmbModel_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_suppressModelChange) return;
+            try
+            {
+                var cb = cmbModel.SelectedItem as ComboBoxItem;
+                if (cb == null || cb.Tag == null) return;
+                var newModel = cb.Tag.ToString();
+
+                // Local 由来の生データが履歴にある状態で Gemini に切り替えようとしたら警告。
+                // （送信自体は btnSendGemini_Click 側でも履歴クリアまでブロックする）
+                if (_historyContainsLocal && !IsLocalModel(newModel))
+                {
+                    MessageBox.Show(
+                        "チャット履歴にローカルLLM（マスキングなし）の生データが含まれています。\n" +
+                        "このまま Gemini に送信すると、その生データが無加工で外部に送信される恐れがあります。\n\n" +
+                        "Gemini に送信する前に「クリア履歴」で履歴をクリアしてください。",
+                        "マスキングなしデータの混在に注意",
+                        MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+
+                _selectedModel = newModel;
+                AddinConfig.SetLastModel(_selectedModel);
+                UpdateLocalIndicator();
+            }
             catch { }
+        }
+
+        private void BtnRefreshModels_Click(object sender, RoutedEventArgs e)
+        {
+            _ = RefreshModelListAsync();
+        }
+
+        // ローカルLLM向けの system 指示。Gemini と異なりマスキング維持の指示は不要。
+        private static string BuildLocalSystemInstruction(bool allowMarkdown)
+        {
+            if (allowMarkdown)
+                return "あなたはExcelアドインのチャット応答エンジンです。"
+                     + "出力に表が適切な場合はMarkdownの表形式（| 列1 | 列2 | ... |）で返してください。"
+                     + "その他のMarkdown装飾は必要最小限にしてください。";
+            return "あなたはExcelアドインのチャット応答エンジンです。"
+                 + "見出し・箇条書き・太字などのMarkdown装飾は使わず、プレーンテキストのみで出力してください。";
+        }
+
+        // Local 選択中は入力欄の枠を強調し「マスキングOFF」バッジを表示する。
+        private void UpdateLocalIndicator()
+        {
+            bool isLocal = IsLocalModel(_selectedModel);
+            if (LocalBadge != null)
+                LocalBadge.Visibility = isLocal ? Visibility.Visible : Visibility.Collapsed;
+            if (InputBox != null)
+            {
+                InputBox.BorderBrush = isLocal
+                    ? System.Windows.Media.Brushes.OrangeRed
+                    : System.Windows.Media.Brushes.Gray;
+                InputBox.BorderThickness = new Thickness(isLocal ? 2 : 1);
+            }
         }
 
         // テンプレートボタン: 一覧表示 → 選択で入力欄に挿入、または 新規/編集

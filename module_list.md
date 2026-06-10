@@ -21,7 +21,7 @@
 | `ExcelChatAddin/TaskPaneHost.cs` | カスタムタスクペインの WinForms ホスト。`ElementHost` で WPF `ChatView` を埋め込み、Excel セル操作のブリッジ |
 | `ExcelChatAddin/TaskPaneHost.Designer.cs` | `TaskPaneHost` 自動生成コード（編集不要） |
 | `ExcelChatAddin/ChatView.xaml` | チャット画面レイアウト（WPF） |
-| `ExcelChatAddin/ChatView.xaml.cs` | チャットUIの全制御。`@range`/`@table` トークン解析、送信ペイロード構築（マスキング・スキーマ同梱）、Gemini応答のシート反映、検証ループ呼び出し |
+| `ExcelChatAddin/ChatView.xaml.cs` | チャットUIの全制御。`@range`/`@table` トークン解析、送信ペイロード構築（マスキング有無を切替・スキーマ同梱）、Gemini/ローカルLLM への送信分岐、応答のシート反映、検証ループ呼び出し。モデル選択コンボ（Gemini静的＋ローカル動的）、Local由来履歴がある状態でのGemini送信ブロック、マスキングOFFバッジ表示 |
 
 ### AI連携
 
@@ -30,6 +30,7 @@
 | `ExcelChatAddin/GeminiClient.cs` | Gemini API への HTTP 通信（シングルトン）。system instruction 生成、ストリーミング非対応の GenerateAsync |
 | `ExcelChatAddin/GeminiDtos.cs` | Gemini API リクエスト/レスポンス用 DTO |
 | `ExcelChatAddin/GeminiResponseWindow.xaml.cs` | Gemini 応答のポップアップ表示ウィンドウ（WPF） |
+| `ExcelChatAddin/OllamaClient.cs` | ローカルLLM（ollama）への HTTP 通信ラッパ。`/api/tags` でモデル一覧取得、`/api/chat` で送信。接続不可/モデル未pull/タイムアウト時はフォールバックせず明確な例外を投げる。パース/URL組み立ては `OllamaProtocol` に委譲 |
 | `ExcelChatAddin/ContentValidator.cs` | LLM 生成 JSON の定義準拠バリデーション。検証プロンプト構築・ループ制御（最大3回）・date型誤指摘フィルタ |
 
 ### マスキング
@@ -68,6 +69,7 @@
 | ファイル | 役割 |
 |---|---|
 | `ExcelChatAddin/Paths.cs` | 永続データ保存先の統一管理。共通パスは `MaskingPaths` へ委譲し、Excel固有パス（`table_schema.json` / `table_relations.json` / テンプレート等）を追加定義 |
+| `ExcelChatAddin/AddinConfig.cs` | `config.json` の読み書き。ローカルLLM のエンドポイント（`ollamaBaseUrl`）と最後に選択したモデル（`lastModel`）を永続化。未知のキーは保持 |
 
 ### テンプレート
 
@@ -100,6 +102,7 @@
 | `OfficeMasking.Core/DictionaryManagerLogic.cs` | フィルタ判定・削除候補抽出・バリデーション（`ValidateNewEntry`）・プレースホルダー生成（`GeneratePlaceholder`）のロジック層。UI非依存 |
 | `OfficeMasking.Core/IMaskingLogger.cs` | ログ出力インターフェース定義 |
 | `OfficeMasking.Core/NullMaskingLogger.cs` | Null オブジェクトパターンの `IMaskingLogger` 実装（テスト・デフォルト用） |
+| `OfficeMasking.Core/OllamaProtocol.cs` | ローカルLLM（ollama）API の純粋ロジック。URL正規化、`/api/tags` のモデル一覧パース、`/api/chat` リクエスト生成・レスポンスパース。HTTP通信を持たず単体テスト可能 |
 
 ---
 
@@ -113,3 +116,4 @@ MSTest テストプロジェクト。`OfficeMasking.Core` のみを対象とす�
 | `OfficeMasking.Core.Tests/MaskingRulesStoreTests.cs` | `MaskingRulesStore` の単体テスト（Load/Save/50世代バックアップ/復元/旧形式エラー） |
 | `OfficeMasking.Core.Tests/MaskingPathsTests.cs` | `MaskingPaths` の単体テスト（DataDir解決/IsDataDirEnvironmentConfigured等） |
 | `OfficeMasking.Core.Tests/DictionaryManagerLogicTests.cs` | `DictionaryManagerLogic` の単体テスト（バリデーション/プレースホルダー生成/削除候補抽出等） |
+| `OfficeMasking.Core.Tests/OllamaProtocolTests.cs` | `OllamaProtocol` の単体テスト（URL正規化/モデル一覧パース/チャットリクエスト生成/レスポンスパース） |

@@ -109,12 +109,16 @@
                 <StackPanel Orientation="Vertical" HorizontalAlignment="Right" Margin="0,0,8,0">
                     <CheckBox x:Name="chkRequestTable" Content="表形式で回答" Checked="ChkRequestTable_Checked" Unchecked="ChkRequestTable_Unchecked" Margin="0,0,0,4" />
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <ComboBox x:Name="cmbModel" Width="140" SelectionChanged="CmbModel_SelectionChanged">
-                            <ComboBoxItem Tag="gemini-3.1-flash-lite-preview">gemini-3.1-flash-lite-preview</ComboBoxItem>
-                            <ComboBoxItem Tag="gemini-3-flash-preview">gemini-3-flash-preview</ComboBoxItem>
-                            <ComboBoxItem Tag="gemini-3.1-pro-preview">gemini-3.1-pro-preview</ComboBoxItem>
-                            <ComboBoxItem Tag="gemini-2.5-pro">gemini-2.5-pro</ComboBoxItem>
-                        </ComboBox>
+                        <Border x:Name="LocalBadge" Background="OrangeRed" CornerRadius="3"
+                                Padding="4,1" Margin="0,0,4,0" Visibility="Collapsed"
+                                VerticalAlignment="Center"
+                                ToolTip="ローカルLLM選択中：マスキングせず生データを送信します">
+                            <TextBlock Text="マスキングOFF" Foreground="White" FontSize="10" FontWeight="Bold"/>
+                        </Border>
+                        <ComboBox x:Name="cmbModel" Width="140" SelectionChanged="CmbModel_SelectionChanged"/>
+                        <Button x:Name="btnRefreshModels" Content="⟳" Width="24" Height="22"
+                                Margin="2,0,0,0" Click="BtnRefreshModels_Click"
+                                ToolTip="ローカルLLMのモデル一覧を更新"/>
                     </StackPanel>
                 </StackPanel>
 
