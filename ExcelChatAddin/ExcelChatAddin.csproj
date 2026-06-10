@@ -207,8 +207,10 @@
     <Compile Include="DiffPreviewDialog.cs">
       <SubType>Form</SubType>
     </Compile>
+    <Compile Include="AddinConfig.cs" />
     <Compile Include="GeminiClient.cs" />
     <Compile Include="GeminiDtos.cs" />
+    <Compile Include="OllamaClient.cs" />
     <Compile Include="GeminiResponseWindow.xaml.cs">
       <DependentUpon>GeminiResponseWindow.xaml</DependentUpon>
     </Compile>
