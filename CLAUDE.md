@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## コミット運用
+
+作業は**意味のある変更ごとに都度コミットする**こと。複数の変更をまとめて巨大な1コミットにしない。
+
+- 1つの論理的な変更（機能追加・バグ修正・リファクタリング・ファイル削除など）が完了したら、その単位でコミットする
+- コミット前に `module_list.md` の更新漏れがないか確認する（[module_list.md の維持](#module_listmd-の維持) 参照）
+- コミットメッセージは日本語で、`種別: 要約`（例: `fix:`, `feat:`, `refactor:`, `docs:`, `chore:`）の形式にする
+
+---
+
 ## module_list.md の維持
 
 `module_list.md` はプロジェクト全体のモジュール一覧ファイル。以下のいずれかを行ったときは必ず更新すること。
