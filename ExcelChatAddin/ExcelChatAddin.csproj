@@ -324,7 +324,7 @@
     <ManifestKeyFile>ExcelChatAddin_TemporaryKey.pfx</ManifestKeyFile>
   </PropertyGroup>
   <PropertyGroup>
-    <ManifestCertificateThumbprint>71CCE84913B41A91CA16CC64AC7A77AEED3AD79E</ManifestCertificateThumbprint>
+    <ManifestCertificateThumbprint>6477D8B726E089FA679F7FE86BC4EC5873D0DF7A</ManifestCertificateThumbprint>
   </PropertyGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- Include additional build rules for an Office application add-in. -->

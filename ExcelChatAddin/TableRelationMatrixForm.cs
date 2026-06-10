@@ -27,6 +27,7 @@ namespace ExcelChatAddin
         private Panel _detailPanel;
         private Label _lblFrom;
         private Label _lblTo;
+        private ComboBox _cmbRelationType;
         private TextBox _txtMeaning;
         private TextBox _txtNotes;
         private CheckBox _chkDecoupling;
@@ -121,11 +122,12 @@ namespace ExcelChatAddin
             // --- 右ペイン（先に生成） ---
             _lblFrom = new Label { Text = "-", AutoSize = false, Size = new Size(320, 18), Location = new Point(8, 26) };
             _lblTo   = new Label { Text = "-", AutoSize = false, Size = new Size(320, 18), Location = new Point(8, 68) };
-            _txtMeaning    = new TextBox { Location = new Point(8, 116), Width = 320 };
-            _txtNotes      = new TextBox { Location = new Point(8, 166), Width = 320, Height = 60, Multiline = true };
-            _chkDecoupling = new CheckBox { Text = "疎結合化", AutoSize = true, Location = new Point(8, 234) };
-            _btnSaveDetail  = new Button { Text = "保存",   Location = new Point(8,  262), Width = 80 };
-            _btnCloseDetail = new Button { Text = "閉じる", Location = new Point(96, 262), Width = 80 };
+            _cmbRelationType = new ComboBox { Location = new Point(8, 116), Width = 320, DropDownStyle = ComboBoxStyle.DropDownList };
+            _txtMeaning    = new TextBox { Location = new Point(8, 162), Width = 320 };
+            _txtNotes      = new TextBox { Location = new Point(8, 212), Width = 320, Height = 60, Multiline = true };
+            _chkDecoupling = new CheckBox { Text = "疎結合化", AutoSize = true, Location = new Point(8, 280) };
+            _btnSaveDetail  = new Button { Text = "保存",   Location = new Point(8,  308), Width = 80 };
+            _btnCloseDetail = new Button { Text = "閉じる", Location = new Point(96, 308), Width = 80 };
             _btnSaveDetail.Click  += (s, e) => SaveDetail();
             _btnCloseDetail.Click += (s, e) => CloseDetail();
 
@@ -134,8 +136,9 @@ namespace ExcelChatAddin
             {
                 new Label { Text = "From:", AutoSize = true, Location = new Point(8, 8) }, _lblFrom,
                 new Label { Text = "To:",   AutoSize = true, Location = new Point(8, 50) }, _lblTo,
-                new Label { Text = "意味:", AutoSize = true, Location = new Point(8, 96) }, _txtMeaning,
-                new Label { Text = "補足:", AutoSize = true, Location = new Point(8, 146) }, _txtNotes,
+                new Label { Text = "関係種別:", AutoSize = true, Location = new Point(8, 96) }, _cmbRelationType,
+                new Label { Text = "意味:", AutoSize = true, Location = new Point(8, 142) }, _txtMeaning,
+                new Label { Text = "補足:", AutoSize = true, Location = new Point(8, 192) }, _txtNotes,
                 _chkDecoupling, _btnSaveDetail, _btnCloseDetail
             });
 
@@ -529,6 +532,16 @@ namespace ExcelChatAddin
                 && string.Equals(r.ToTableName, to.TableName, StringComparison.OrdinalIgnoreCase)
                 && string.Equals(r.ToKey, to.KeyValue, StringComparison.OrdinalIgnoreCase));
 
+            // 関係種別コンボを更新
+            var typeCodes = _store.RelationTypes.Where(x => x.IsEnabled)
+                .OrderBy(x => x.SortOrder).ThenBy(x => x.RelationTypeCode)
+                .Select(x => x.RelationTypeCode).ToArray();
+            _cmbRelationType.Items.Clear();
+            _cmbRelationType.Items.AddRange(typeCodes);
+            var currentType = rel?.RelationTypeCode ?? "";
+            var idx = Array.FindIndex(typeCodes, t => string.Equals(t, currentType, StringComparison.OrdinalIgnoreCase));
+            _cmbRelationType.SelectedIndex = idx >= 0 ? idx : (typeCodes.Length > 0 ? 0 : -1);
+
             _txtMeaning.Text       = rel?.Meaning ?? "";
             _txtNotes.Text         = rel?.Notes ?? "";
             _chkDecoupling.Checked = rel?.IsDecoupling ?? false;
@@ -560,21 +573,26 @@ namespace ExcelChatAddin
                     && string.Equals(r.ToTableName, _detailToTable, StringComparison.OrdinalIgnoreCase)
                     && string.Equals(r.ToKey, _detailToKey, StringComparison.OrdinalIgnoreCase));
 
+                var selectedType = (_cmbRelationType.SelectedItem?.ToString() ?? "").Trim();
+                if (string.IsNullOrWhiteSpace(selectedType))
+                {
+                    MessageBox.Show("関係種別を選択してください。", "関係マトリクス", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
                 if (rel == null)
                 {
-                    var defaultType = _store.RelationTypes.Where(x => x.IsEnabled)
-                        .OrderBy(x => x.SortOrder).Select(x => x.RelationTypeCode).FirstOrDefault() ?? "REFERENCE";
                     rel = new TableRecordRelation
                     {
                         FromTableName    = _detailFromTable,
                         FromKey          = _detailFromKey,
                         ToTableName      = _detailToTable,
                         ToKey            = _detailToKey,
-                        RelationTypeCode = defaultType
                     };
                     _relations.Add(rel);
                 }
 
+                rel.RelationTypeCode = TableRelationManager.NormalizeCode(selectedType);
                 rel.Meaning      = _txtMeaning.Text.Trim();
                 rel.Notes        = _txtNotes.Text.Trim();
                 rel.IsDecoupling = _chkDecoupling.Checked;
