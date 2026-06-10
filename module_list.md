@@ -22,8 +22,6 @@
 | `ExcelChatAddin/TaskPaneHost.Designer.cs` | `TaskPaneHost` 自動生成コード（編集不要） |
 | `ExcelChatAddin/ChatView.xaml` | チャット画面レイアウト（WPF） |
 | `ExcelChatAddin/ChatView.xaml.cs` | チャットUIの全制御。`@range`/`@table` トークン解析、送信ペイロード構築（マスキング・スキーマ同梱）、Gemini応答のシート反映、検証ループ呼び出し |
-| `ExcelChatAddin/ChatCoordinator.cs` | マスキング → Gemini送信 → 履歴保存のパイプライン調整 |
-| `ExcelChatAddin/ChatModels.cs` | `ChatSession` / `ChatMessage` / `ChatHistoryStore` のデータモデル |
 
 ### AI連携
 
@@ -69,7 +67,6 @@
 
 | ファイル | 役割 |
 |---|---|
-| `ExcelChatAddin/ConfigManager.cs` | `config.json` の読み書き（Geminiモデル名・APIキー等） |
 | `ExcelChatAddin/Paths.cs` | 永続データ保存先の統一管理。共通パスは `MaskingPaths` へ委譲し、Excel固有パス（`table_schema.json` / `table_relations.json` / テンプレート等）を追加定義 |
 
 ### テンプレート
