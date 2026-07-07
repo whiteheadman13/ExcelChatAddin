@@ -97,9 +97,10 @@
 
 | ファイル | 役割 |
 |---|---|
-| `OfficeMasking.Core/MaskingEngine.cs` | マスキングのシングルトンエンジン。`Mask` / `Unmask` / `AddRule` / `AddRuleWithPlaceholder` / `OverrideRules` を提供。ロード失敗時は `IsAvailable=false` で書き込みを保護し、`Mask` も例外停止（H-2 フェイルセーフ）。送信前チェック用 `FindRegisteredWordsIn`、AI変形検出用 `FindUnresolvedPlaceholders` / `AppendUnresolvedPlaceholderWarning(ForDisplay)`（H-3）も提供 |
+| `OfficeMasking.Core/MaskingEngine.cs` | マスキングのシングルトンエンジン（rules.json v2 対応・内部は `MaskingRule` エントリ保持）。エイリアス（表記ゆれ）・意味・有効フラグ・大小文字区別に対応。`Mask`/`Unmask`（プレースホルダーは代表表記へ復元・大小文字フォールバック）/`AddRule`/`AddRuleWithPlaceholder`/`GetAllEntries`/`OverrideEntries` を提供。互換の Dictionary API（`GetAllRules`/`OverrideRules`）は v2 メタデータ・無効エントリを保全して更新。ロード失敗時は `IsAvailable=false` で書き込み保護し `Mask` も例外停止（H-2）。送信前チェック `FindRegisteredWordsIn`（H-1）、AI変形検出 `FindUnresolvedPlaceholders`/`AppendUnresolvedPlaceholderWarning(ForDisplay)`（H-3） |
 | `OfficeMasking.Core/MaskingSendGuard.cs` | 外部LLM送信直前の最終セーフティネット（H-1）。ペイロードに辞書登録語が平文で残っていれば `ConfirmSendDespiteLeaks`（アプリ側の警告ダイアログ）で確認し、中止時は `OperationCanceledException` を投げる。確認関数未設定時は安全側で中止 |
-| `OfficeMasking.Core/MaskingRulesStore.cs` | `rules.json` の読み書きと50世代バックアップローテーション。保存のたびにバックアップを実行 |
+| `OfficeMasking.Core/MaskingRule.cs` | rules.json v2 のデータモデル（`MaskingRule`：word/placeholder/category/meaning/aliases/caseInsensitive/enabled）と読み書きロジック（`MaskingRuleFile`：v2解析・v1→v2移行・シリアライズ・カテゴリ抽出）。powerpoint_masking2 と同一スキーマ（データ共有のため互換必須） |
+| `OfficeMasking.Core/MaskingRulesStore.cs` | `rules.json`（v2形式）の読み書き（`LoadEntries`/`SaveEntries`）と50世代バックアップローテーション。v1は読込時にv2へ移行。保存は必ずv2で行い共有相手の情報を失わない |
 | `OfficeMasking.Core/MaskingPaths.cs` | データ保存先の決定ロジック。優先順：環境変数 `OFFICE_MASKING_DATA_DIR` > `AppData\OfficeChatMasking`。旧フォルダ（`PowerPointMasking`/DLL直下）からの自動移行も管理 |
 | `OfficeMasking.Core/DictionaryManagerLogic.cs` | フィルタ判定・削除候補抽出・バリデーション（`ValidateNewEntry`）・プレースホルダー生成（`GeneratePlaceholder`）のロジック層。UI非依存 |
 | `OfficeMasking.Core/IMaskingLogger.cs` | ログ出力インターフェース定義 |
@@ -116,7 +117,7 @@ MSTest テストプロジェクト。`OfficeMasking.Core` のみを対象とす�
 |---|---|
 | `OfficeMasking.Core.Tests/MaskingEngineTests.cs` | `MaskingEngine` の単体テスト（Mask/Unmask/AddRule/ロード失敗保護/H-2 Mask停止/H-1 FindRegisteredWordsIn/H-3 未復元プレースホルダー検出等） |
 | `OfficeMasking.Core.Tests/MaskingSendGuardTests.cs` | `MaskingSendGuard` の単体テスト（平文残存の検出・確認関数の続行/中止・未設定時のフェイルセーフ中止・複数パート走査/重複排除）（H-1） |
-| `OfficeMasking.Core.Tests/MaskingRulesStoreTests.cs` | `MaskingRulesStore` の単体テスト（Load/Save/50世代バックアップ/復元/旧形式エラー） |
+| `OfficeMasking.Core.Tests/MaskingRulesStoreTests.cs` | `MaskingRulesStore` の単体テスト（LoadEntries/SaveEntries・v1→v2移行・v2形式保存・50世代バックアップ/復元/旧[..]形式エラー） |
 | `OfficeMasking.Core.Tests/MaskingPathsTests.cs` | `MaskingPaths` の単体テスト（DataDir解決/IsDataDirEnvironmentConfigured等） |
 | `OfficeMasking.Core.Tests/DictionaryManagerLogicTests.cs` | `DictionaryManagerLogic` の単体テスト（バリデーション/プレースホルダー生成/削除候補抽出等） |
 | `OfficeMasking.Core.Tests/OllamaProtocolTests.cs` | `OllamaProtocol` の単体テスト（URL正規化/モデル一覧パース/チャットリクエスト生成/レスポンスパース） |

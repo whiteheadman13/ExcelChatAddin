@@ -5,12 +5,18 @@ using System.Text.RegularExpressions;
 
 namespace OfficeMasking.Core
 {
+    /// <summary>
+    /// マスキングのシングルトンエンジン（rules.json v2 対応）。
+    /// 内部は <see cref="MaskingRule"/> のエントリ一覧で保持し、エイリアス（表記ゆれ）・意味・
+    /// 有効フラグ・大小文字区別に対応する。powerpoint_masking2 と rules.json を共有する。
+    /// 既存の呼び出し互換のため Dictionary ベースの API（GetAllRules / OverrideRules 等）も残す。
+    /// </summary>
     public class MaskingEngine
     {
         private static MaskingEngine _instance;
         private static IMaskingLogger _logger = NullMaskingLogger.Instance;
 
-        private Dictionary<string, string> _maskDb = new Dictionary<string, string>();
+        private List<MaskingRule> _entries = new List<MaskingRule>();
         private bool _loadFailed;
         private string _loadFailureMessage;
         private MaskingRulesStore _store;
@@ -21,17 +27,13 @@ namespace OfficeMasking.Core
 
         public string AvailabilityErrorMessage => _loadFailureMessage;
 
-        /// <summary>
-        /// ロガーを設定する。各アドインの起動時に呼び出す。
-        /// </summary>
+        /// <summary>ロガーを設定する。各アドインの起動時に呼び出す。</summary>
         public static void SetLogger(IMaskingLogger logger)
         {
             _logger = logger ?? NullMaskingLogger.Instance;
         }
 
-        /// <summary>
-        /// シングルトンインスタンスをリセットする（テスト用）。
-        /// </summary>
+        /// <summary>シングルトンインスタンスをリセットする（テスト用）。</summary>
         public static void ResetInstance()
         {
             _instance = null;
@@ -43,10 +45,12 @@ namespace OfficeMasking.Core
             LoadRules();
         }
 
+        // ── 登録 ──
+
         public void AddRule(string original, string category)
         {
             EnsureAvailableForWrite();
-            if (string.IsNullOrWhiteSpace(original) || _maskDb.ContainsKey(original)) return;
+            if (string.IsNullOrWhiteSpace(original) || ContainsRule(original)) return;
 
             string cleanCategory = (category ?? string.Empty).Trim().ToUpper().Replace(" ", "_");
             if (string.IsNullOrEmpty(cleanCategory)) cleanCategory = "MASK";
@@ -57,80 +61,321 @@ namespace OfficeMasking.Core
             {
                 placeholder = $"__{cleanCategory}_{count}__";
                 count++;
-            } while (_maskDb.ContainsValue(placeholder));
+            } while (_entries.Any(e => string.Equals(e.Placeholder, placeholder, StringComparison.Ordinal)));
 
-            _maskDb.Add(original, placeholder);
-            _store.Save(_maskDb);
+            _entries.Add(new MaskingRule
+            {
+                Word = original,
+                Placeholder = placeholder,
+                Category = cleanCategory,
+                Enabled = true,
+            });
+            SaveRules();
         }
 
+        /// <summary>
+        /// 既存プレースホルダーを指定してルールを追加する。
+        /// 同じプレースホルダーのエントリが既にあれば、そのエイリアス（表記ゆれ）として追加する。
+        /// </summary>
         public void AddRuleWithPlaceholder(string original, string placeholder)
         {
             EnsureAvailableForWrite();
-            if (string.IsNullOrWhiteSpace(original) || _maskDb.ContainsKey(original)) return;
-            if (string.IsNullOrWhiteSpace(placeholder)) return;
+            if (string.IsNullOrWhiteSpace(original) || string.IsNullOrWhiteSpace(placeholder)) return;
+            if (ContainsRule(original)) return;
 
-            _maskDb.Add(original, placeholder);
-            _store.Save(_maskDb);
+            var existing = _entries.FirstOrDefault(e => string.Equals(e.Placeholder, placeholder, StringComparison.Ordinal));
+            if (existing != null)
+            {
+                if (existing.Aliases == null) existing.Aliases = new List<string>();
+                existing.Aliases.Add(original);
+            }
+            else
+            {
+                _entries.Add(new MaskingRule
+                {
+                    Word = original,
+                    Placeholder = placeholder,
+                    Category = MaskingRuleFile.ExtractCategory(placeholder),
+                    Enabled = true,
+                });
+            }
+            SaveRules();
         }
+
+        public bool ContainsRule(string original)
+        {
+            if (string.IsNullOrWhiteSpace(original)) return false;
+            foreach (var e in _entries)
+            {
+                var comparison = e.CaseInsensitive ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                foreach (var key in e.AllKeys())
+                {
+                    if (string.Equals(key, original, comparison)) return true;
+                }
+            }
+            return false;
+        }
+
+        // ── 参照（互換 Dictionary API） ──
 
         public Dictionary<string, string> GetExistingPlaceholdersWithExample()
         {
             if (!IsAvailable) return new Dictionary<string, string>();
 
             var result = new Dictionary<string, string>();
-            foreach (var kvp in _maskDb)
+            foreach (var e in _entries)
             {
-                if (!result.ContainsKey(kvp.Value))
-                {
-                    result.Add(kvp.Value, kvp.Key);
-                }
+                if (string.IsNullOrWhiteSpace(e.Placeholder)) continue;
+                if (!result.ContainsKey(e.Placeholder))
+                    result.Add(e.Placeholder, e.Word);
             }
-
             return result.OrderBy(x => x.Key).ToDictionary(x => x.Key, x => x.Value);
         }
 
+        /// <summary>
+        /// 互換用: 有効なルールを「マッチ対象表記（代表表記＋エイリアス）→プレースホルダー」へ平坦化して返す。
+        /// 辞書管理画面の表示やプレースホルダー逆引きで使用。無効エントリは含めない
+        /// （無効エントリは OverrideRules の保全ロジックで別途保持される）。
+        /// </summary>
         public Dictionary<string, string> GetAllRules()
         {
-            return new Dictionary<string, string>(_maskDb);
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var e in _entries)
+            {
+                if (!e.Enabled || string.IsNullOrWhiteSpace(e.Placeholder)) continue;
+                foreach (var key in e.AllKeys())
+                {
+                    if (!result.ContainsKey(key))
+                        result.Add(key, e.Placeholder);
+                }
+            }
+            return result;
         }
 
+        /// <summary>全エントリのコピーを返す（v2 対応 UI 用）。</summary>
+        public List<MaskingRule> GetAllEntries()
+        {
+            return _entries.Select(e => e.Clone()).ToList();
+        }
+
+        // ── 更新 ──
+
+        /// <summary>
+        /// 互換用: 単純辞書（元単語→プレースホルダー）で全ルールを置き換える。
+        /// v2 固有情報（意味・大小文字区別・有効フラグ）は、プレースホルダーが一致する旧エントリから
+        /// 引き継いで保全する。無効エントリのうち新辞書に現れないものは削除せず保持する
+        /// （v1 辞書管理画面から見えないため、共有相手 powerpoint_masking2 のデータを壊さない）。
+        /// </summary>
         public void OverrideRules(Dictionary<string, string> newRules)
         {
             EnsureAvailableForWrite();
-            _maskDb = new Dictionary<string, string>(newRules ?? new Dictionary<string, string>());
-            _store.Save(_maskDb);
+
+            var oldByPlaceholder = new Dictionary<string, MaskingRule>(StringComparer.Ordinal);
+            foreach (var e in _entries)
+            {
+                if (!string.IsNullOrWhiteSpace(e.Placeholder) && !oldByPlaceholder.ContainsKey(e.Placeholder))
+                    oldByPlaceholder[e.Placeholder] = e;
+            }
+
+            var rebuilt = MaskingRuleFile.FromLegacyDictionary(newRules ?? new Dictionary<string, string>());
+
+            // v2 メタデータ（意味・大小文字・有効・カテゴリ）をプレースホルダー単位で引き継ぐ。
+            // エイリアスは v1 辞書のキーとして表現済みのため引き継がない（UI での追加・削除を尊重）。
+            var survivingPlaceholders = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var e in rebuilt)
+            {
+                survivingPlaceholders.Add(e.Placeholder);
+                if (oldByPlaceholder.TryGetValue(e.Placeholder, out var old))
+                {
+                    e.Meaning = old.Meaning;
+                    e.CaseInsensitive = old.CaseInsensitive;
+                    e.Enabled = old.Enabled;
+                    if (!string.IsNullOrWhiteSpace(old.Category)) e.Category = old.Category;
+                }
+            }
+
+            // 無効エントリで新辞書に現れないもの（v1 UI からは不可視）は保持する。
+            foreach (var old in _entries)
+            {
+                if (string.IsNullOrWhiteSpace(old.Placeholder)) continue;
+                if (survivingPlaceholders.Contains(old.Placeholder)) continue;
+                if (!old.Enabled)
+                    rebuilt.Add(old.Clone());
+            }
+
+            _entries = rebuilt;
+            SaveRules();
         }
+
+        /// <summary>全エントリを置き換えて保存する（v2 対応 UI の保存用）。</summary>
+        public void OverrideEntries(List<MaskingRule> entries)
+        {
+            EnsureAvailableForWrite();
+            _entries = (entries ?? new List<MaskingRule>())
+                .Where(e => e != null && !string.IsNullOrWhiteSpace(e.Word) && !string.IsNullOrWhiteSpace(e.Placeholder))
+                .Select(e => e.Clone())
+                .ToList();
+            SaveRules();
+        }
+
+        // ── マスキング ──
 
         public string Mask(string input)
         {
-            // 読込失敗中は辞書が空＝素通しになり機密が外部送信されるため、ここで停止する（フェイルセーフ / H-2）。
+            // 読込失敗中は辞書が空＝素通しになり機密が外部送信されるため、ここで停止する（H-2 フェイルセーフ）。
             EnsureAvailableForMask();
-            if (string.IsNullOrEmpty(input) || _maskDb.Count == 0) return input;
+            if (string.IsNullOrEmpty(input) || _entries.Count == 0) return input;
 
-            var sortedKeys = _maskDb.Keys.OrderByDescending(k => k.Length).ToList();
-            string pattern = "(" + string.Join("|", sortedKeys.Select(k => Regex.Escape(k))) + ")";
+            var keyToEntry = new List<KeyValuePair<string, MaskingRule>>();
+            foreach (var e in _entries)
+            {
+                if (!e.Enabled || string.IsNullOrWhiteSpace(e.Placeholder)) continue;
+                foreach (var key in e.AllKeys())
+                    keyToEntry.Add(new KeyValuePair<string, MaskingRule>(key, e));
+            }
+            if (keyToEntry.Count == 0) return input;
+
+            keyToEntry.Sort((a, b) => b.Key.Length.CompareTo(a.Key.Length));
+
+            var exactMap = new Dictionary<string, string>(StringComparer.Ordinal);
+            var ciMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var alternatives = new List<string>();
+            foreach (var kv in keyToEntry)
+            {
+                string escaped = Regex.Escape(kv.Key);
+                if (kv.Value.CaseInsensitive)
+                {
+                    alternatives.Add("(?i:" + escaped + ")");
+                    if (!ciMap.ContainsKey(kv.Key)) ciMap.Add(kv.Key, kv.Value.Placeholder);
+                }
+                else
+                {
+                    alternatives.Add(escaped);
+                    if (!exactMap.ContainsKey(kv.Key)) exactMap.Add(kv.Key, kv.Value.Placeholder);
+                }
+            }
+
+            string pattern = "(" + string.Join("|", alternatives) + ")";
 
             return Regex.Replace(input, pattern, m =>
             {
-                return _maskDb.ContainsKey(m.Value) ? _maskDb[m.Value] : m.Value;
+                if (exactMap.TryGetValue(m.Value, out var ph)) return ph;
+                if (ciMap.TryGetValue(m.Value, out ph)) return ph;
+                return m.Value;
             });
         }
 
         public string Unmask(string input)
         {
-            if (!IsAvailable || string.IsNullOrEmpty(input) || _maskDb.Count == 0) return input;
+            if (!IsAvailable || string.IsNullOrEmpty(input) || _entries.Count == 0) return input;
+
+            // プレースホルダー → 代表表記（Word）へ復元。無効エントリも復元対象（復元は常に安全）。
+            var pairs = new List<KeyValuePair<string, string>>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var e in _entries)
+            {
+                if (string.IsNullOrWhiteSpace(e.Placeholder) || string.IsNullOrWhiteSpace(e.Word)) continue;
+                if (seen.Add(e.Placeholder))
+                    pairs.Add(new KeyValuePair<string, string>(e.Placeholder, e.Word));
+            }
+            pairs.Sort((a, b) => b.Key.Length.CompareTo(a.Key.Length));
 
             string output = input;
-            var pairs = _maskDb.ToList();
-            pairs.Sort((a, b) => b.Value.Length.CompareTo(a.Value.Length));
+            foreach (var pair in pairs)
+                output = output.Replace(pair.Key, pair.Value);
 
+            // フォールバック: LLM がトークンの大小文字を変えた場合に対応（M-4 相当）
             foreach (var pair in pairs)
             {
-                output = output.Replace(pair.Value, pair.Key);
+                if (output.IndexOf(pair.Key, StringComparison.OrdinalIgnoreCase) >= 0)
+                    output = Regex.Replace(output, Regex.Escape(pair.Key), pair.Value.Replace("$", "$$"), RegexOptions.IgnoreCase);
             }
 
             return output;
         }
+
+        // ── H-1: 送信前の平文残存チェック ──
+
+        /// <summary>
+        /// テキストに含まれる有効エントリの登録単語（代表表記＋エイリアス）を列挙する。
+        /// 送信直前の平文残存チェックに使う。無効エントリはマスク対象外のため検査しない。
+        /// 辞書が読込失敗中の場合は判定不能のため空を返す。
+        /// </summary>
+        public List<string> FindRegisteredWordsIn(string text)
+        {
+            var found = new List<string>();
+            if (!IsAvailable || string.IsNullOrEmpty(text)) return found;
+
+            foreach (var e in _entries)
+            {
+                if (!e.Enabled) continue;
+                var comparison = e.CaseInsensitive ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                foreach (var key in e.AllKeys())
+                {
+                    if (text.IndexOf(key, comparison) >= 0 && !found.Contains(key))
+                        found.Add(key);
+                }
+            }
+            return found;
+        }
+
+        // ── H-3: 未復元プレースホルダーの検出・警告 ──
+
+        // プレースホルダー形式（__カテゴリ_連番__）。カテゴリは日本語も取り得るため \S+? で受ける。
+        private static readonly Regex PlaceholderTokenPattern =
+            new Regex(@"__\S+?_\d+__", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// Unmask 後のテキストに残った、現在の辞書で復元できないプレースホルダー形式のトークンを列挙する。
+        /// LLM がトークンを変形・捏造した可能性の検出に使う。
+        /// </summary>
+        public List<string> FindUnresolvedPlaceholders(string text)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrEmpty(text)) return result;
+
+            var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var e in _entries)
+            {
+                if (!string.IsNullOrWhiteSpace(e.Placeholder)) known.Add(e.Placeholder);
+            }
+
+            foreach (Match m in PlaceholderTokenPattern.Matches(text))
+            {
+                if (known.Contains(m.Value)) continue;
+                if (!result.Contains(m.Value)) result.Add(m.Value);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Unmask 済みテキストに未復元プレースホルダーが残っていれば、末尾へ警告文を付加して返す（表示用）。
+        /// </summary>
+        public string AppendUnresolvedPlaceholderWarning(string unmaskedText)
+        {
+            if (string.IsNullOrEmpty(unmaskedText)) return unmaskedText;
+            var unresolved = FindUnresolvedPlaceholders(unmaskedText);
+            if (unresolved.Count == 0) return unmaskedText;
+
+            return unmaskedText
+                + "\n\n⚠ 復元できないプレースホルダーが残っています（AIがマスク記号を変形・捏造した可能性があります）: "
+                + string.Join(", ", unresolved);
+        }
+
+        /// <summary>表示直前の応答テキストへ未復元プレースホルダー警告を付加する（UI 用の安全ラッパー）。</summary>
+        public static string AppendUnresolvedPlaceholderWarningForDisplay(string unmaskedText)
+        {
+            try
+            {
+                return Instance.AppendUnresolvedPlaceholderWarning(unmaskedText);
+            }
+            catch
+            {
+                return unmaskedText;
+            }
+        }
+
+        // ── 内部 ──
 
         private void EnsureAvailableForWrite()
         {
@@ -150,98 +395,32 @@ namespace OfficeMasking.Core
                 ?? "マスキング辞書を読み込めないため、機密が未マスクで送信されるのを防ぐため処理を中止しました。");
         }
 
-        /// <summary>
-        /// テキストに含まれる登録単語（辞書キー）を列挙する。送信直前の平文残存チェック（H-1）に使う。
-        /// 辞書が読込失敗中（利用不可）の場合は判定不能のため空を返す（Mask 側で停止するため二重には止めない）。
-        /// </summary>
-        public List<string> FindRegisteredWordsIn(string text)
+        private void SaveRules()
         {
-            var found = new List<string>();
-            if (!IsAvailable || string.IsNullOrEmpty(text)) return found;
-
-            foreach (var key in _maskDb.Keys)
-            {
-                if (string.IsNullOrEmpty(key)) continue;
-                if (text.IndexOf(key, StringComparison.Ordinal) >= 0 && !found.Contains(key))
-                    found.Add(key);
-            }
-            return found;
-        }
-
-        // プレースホルダー形式（__カテゴリ_連番__）。カテゴリは日本語も取り得るため \S+? で受ける。
-        // LLM が大小文字を変形するケースも拾えるよう IgnoreCase。
-        private static readonly Regex PlaceholderTokenPattern =
-            new Regex(@"__\S+?_\d+__", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-        /// <summary>
-        /// Unmask 後のテキストに残った、現在の辞書で復元できないプレースホルダー形式のトークンを列挙する（H-3）。
-        /// LLM がトークンを変形・捏造した可能性の検出に使う。辞書に存在するプレースホルダーは
-        /// Unmask で復元済みのため対象外。
-        /// </summary>
-        public List<string> FindUnresolvedPlaceholders(string text)
-        {
-            var result = new List<string>();
-            if (string.IsNullOrEmpty(text)) return result;
-
-            var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var ph in _maskDb.Values)
-            {
-                if (!string.IsNullOrWhiteSpace(ph)) known.Add(ph);
-            }
-
-            foreach (Match m in PlaceholderTokenPattern.Matches(text))
-            {
-                if (known.Contains(m.Value)) continue;
-                if (!result.Contains(m.Value)) result.Add(m.Value);
-            }
-            return result;
-        }
-
-        /// <summary>
-        /// Unmask 済みテキストに未復元プレースホルダーが残っていれば、末尾へ警告文を付加して返す（表示用 / H-3）。
-        /// 該当がなければ入力をそのまま返す。
-        /// </summary>
-        public string AppendUnresolvedPlaceholderWarning(string unmaskedText)
-        {
-            if (string.IsNullOrEmpty(unmaskedText)) return unmaskedText;
-            var unresolved = FindUnresolvedPlaceholders(unmaskedText);
-            if (unresolved.Count == 0) return unmaskedText;
-
-            return unmaskedText
-                + "\n\n⚠ 復元できないプレースホルダーが残っています（AIがマスク記号を変形・捏造した可能性があります）: "
-                + string.Join(", ", unresolved);
-        }
-
-        /// <summary>表示直前の応答テキストへ未復元プレースホルダー警告を付加する（UI 用の安全ラッパー / H-3）。</summary>
-        public static string AppendUnresolvedPlaceholderWarningForDisplay(string unmaskedText)
-        {
-            try
-            {
-                return Instance.AppendUnresolvedPlaceholderWarning(unmaskedText);
-            }
-            catch
-            {
-                return unmaskedText;
-            }
+            _store.SaveEntries(_entries);
         }
 
         private void LoadRules()
         {
-            _maskDb = new Dictionary<string, string>();
+            _entries = new List<MaskingRule>();
             _loadFailed = false;
             _loadFailureMessage = null;
 
             try
             {
-                var dict = _store.Load();
-                if (dict != null)
+                var entries = _store.LoadEntries(out bool migrated);
+                _entries = entries ?? new List<MaskingRule>();
+
+                // v1 から移行した場合は v2 形式で保存し直す（旧ファイルは起動時バックアップ .bak1 に残る）。
+                if (migrated)
                 {
-                    _maskDb = new Dictionary<string, string>(dict);
+                    try { _store.SaveEntries(_entries); }
+                    catch (Exception ex) { _logger.LogException(ex, "Failed to persist migrated v2 rules"); }
                 }
             }
             catch (Exception ex)
             {
-                _maskDb = new Dictionary<string, string>();
+                _entries = new List<MaskingRule>();
                 _loadFailed = true;
                 _loadFailureMessage =
                     "マスキング辞書の読み込みに失敗しました。\n"

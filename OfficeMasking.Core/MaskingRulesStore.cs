@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using Newtonsoft.Json;
 
 namespace OfficeMasking.Core
 {
     /// <summary>
     /// マスキング辞書 (rules.json) の読込・保存・バックアップ・復元を一元管理する。
+    /// 形式は v2（{"version":2,"entries":[...]}）。v1（単純辞書）は読込時に v2 へ移行する。
+    /// powerpoint_masking2 と rules.json を共有するため、保存も必ず v2 で行い、
+    /// エイリアス・意味・有効フラグ等を失わないようにする。
     /// 保存のたびにバックアップをローテーションし、最大50世代を保持する。
     /// </summary>
     public class MaskingRulesStore
@@ -22,12 +24,14 @@ namespace OfficeMasking.Core
         private string RulesPath => MaskingPaths.RulesPath;
 
         /// <summary>
-        /// rules.json を読み込んで返す。
+        /// rules.json を読み込み v2 エントリ一覧を返す。
         /// ファイルが存在しなければバックアップからの復元を試みる。
-        /// 旧形式 ([..]) を検出した場合は例外をスローする。
+        /// v1 から移行した場合は <paramref name="migrated"/> が true になる（呼び出し側で保存し直す）。
+        /// 解析エラー（旧[..]形式・不正JSON等）の場合は例外をスローする。
         /// </summary>
-        public Dictionary<string, string> Load()
+        public List<MaskingRule> LoadEntries(out bool migrated)
         {
+            migrated = false;
             MaskingPaths.EnsureDataDir();
 
             TryRestoreFromBackup();
@@ -35,47 +39,52 @@ namespace OfficeMasking.Core
             if (!File.Exists(RulesPath))
             {
                 _logger.LogInfo($"Masking rules file not found. path='{RulesPath}'");
-                return null;
+                return new List<MaskingRule>();
             }
 
             string json = File.ReadAllText(RulesPath);
             if (string.IsNullOrWhiteSpace(json))
             {
-                throw new InvalidDataException("rules.json が空です。");
+                return new List<MaskingRule>();
             }
 
-            var dict = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
-            if (dict == null)
+            var result = MaskingRuleFile.Parse(json);
+            if (result.Error != null)
             {
-                throw new InvalidDataException("rules.json を辞書形式として読み込めませんでした。");
+                throw new InvalidDataException(result.Error);
             }
 
-            foreach (var kvp in dict)
-            {
-                if (kvp.Value != null && kvp.Value.StartsWith("[") && kvp.Value.EndsWith("]"))
-                {
-                    throw new InvalidDataException(
-                        "旧形式プレースホルダー([..]) を検出しました。自動変換・上書きは行いません。\n"
-                        + "手動で [XXX] を __XXX__ 形式に変換してください。");
-                }
-            }
-
-            _logger.LogInfo($"Loaded masking rules: path='{RulesPath}', count={dict.Count}");
-            return dict;
+            migrated = result.Migrated;
+            _logger.LogInfo($"Loaded masking rules: path='{RulesPath}', count={result.Entries.Count}, migrated={migrated}");
+            return result.Entries;
         }
 
         /// <summary>
-        /// rules.json を保存する。保存前にバックアップをローテーションする。
+        /// v2 エントリ一覧を rules.json へ保存する。保存前にバックアップをローテーションする。
         /// </summary>
-        public void Save(Dictionary<string, string> rules, [System.Runtime.CompilerServices.CallerMemberName] string caller = null)
+        public void SaveEntries(List<MaskingRule> entries, [System.Runtime.CompilerServices.CallerMemberName] string caller = null)
         {
             MaskingPaths.EnsureDataDir();
 
             RotateBackups();
 
-            string json = JsonConvert.SerializeObject(rules, Formatting.Indented);
-            File.WriteAllText(RulesPath, json);
-            _logger.LogInfo($"Saved masking rules: path='{RulesPath}', count={rules.Count}, caller={caller}");
+            string json = MaskingRuleFile.Serialize(entries ?? new List<MaskingRule>());
+
+            // 一時ファイル経由で安全に書き込む
+            string tmp = RulesPath + ".tmp";
+            try
+            {
+                File.WriteAllText(tmp, json);
+                File.Copy(tmp, RulesPath, overwrite: true);
+                File.Delete(tmp);
+            }
+            catch
+            {
+                // フォールバック：直接書き込み
+                File.WriteAllText(RulesPath, json);
+            }
+
+            _logger.LogInfo($"Saved masking rules: path='{RulesPath}', count={entries?.Count ?? 0}, caller={caller}");
         }
 
         /// <summary>

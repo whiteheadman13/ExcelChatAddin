@@ -21,10 +21,10 @@
 
 | # | 状態 | 種別 | 項目 | 内容・PowerPoint 側の参照 |
 |---|---|---|---|---|
-| M-1 | 未着手 | 機能追加 | **rules.json v2（MaskingRule）へ移行** | PowerPoint はエイリアス（表記ゆれ）・意味・有効/無効フラグ・大小文字区別を各ルールに持つ v2 形式。Excel は `Dictionary<string,string>` の v1 のみ。`ChatView.xaml.cs:1827` に「後で PowerPoint の MaskingEngine に差し替え」の TODO コメントあり。参照: `powerpoint_masking2/MaskingRule.cs`, `MaskingEngine.cs` |
+| M-1 | ✅ 完了 | 機能追加 | **rules.json v2（MaskingRule）へ移行** | ⚠**共有 rules.json が PowerPoint により v2 化され、Excel が読込失敗でクラッシュしたため緊急対応**。`MaskingRule`/`MaskingRuleFile` を Core へ移植し、`MaskingRulesStore`/`MaskingEngine` を v2（エントリ）ベースへ全面改修。エイリアス・意味・有効フラグ・大小文字区別に対応。互換 Dictionary API は v2 メタデータ・無効エントリを保全して更新（共有相手のデータを壊さない）。実データ102件の読込を確認。参照: `powerpoint_masking2/MaskingRule.cs`, `MaskingEngine.cs` |
 | M-2 | 未着手 | 機能追加 | **意味ヒント送信（BuildMeaningHintBlock / AppendMeaningHintsForSend）** | マスク語の「意味」を機密を含めずに LLM へ渡し理解を助ける。設定で ON/OFF。Excel は未対応（v2 前提）。参照: `powerpoint_masking2/MaskingEngine.cs:389,508` |
 | M-3 | 未着手 | 機能追加 | **@トークン保護マスキング（MaskExcludingAtTokens 相当）** | Excel は `@range(...)` を独自処理しているが、PowerPoint 型の「@token を退避→マスク→復元」の汎用ガードは無い。@range 解決経路の取りこぼし確認と統一。参照: `powerpoint_masking2/MaskingEngine.cs:325`, `ExcelChatAddin/ChatView.xaml.cs:67,479` |
-| M-4 | 未着手 | 機能追加 | **Unmask の大小文字非区別フォールバック** | LLM がトークンの大小文字を変えても復元できるフォールバックを Excel の `Unmask()` に追加。参照: `powerpoint_masking2/MaskingEngine.cs:368` |
+| M-4 | ✅ 完了 | 機能追加 | **Unmask の大小文字非区別フォールバック** | M-1 の v2 化と同時に `Unmask()` へ大小文字非区別の再置換フォールバックを実装済み。参照: `OfficeMasking.Core/MaskingEngine.cs` |
 
 ## 優先度：低（LLM プロバイダ拡充）
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Newtonsoft.Json;
 using OfficeMasking.Core;
@@ -365,6 +366,94 @@ namespace OfficeMasking.Core.Tests
         public void AppendUnresolvedPlaceholderWarningForDisplay_NullSafe()
         {
             Assert.IsNull(MaskingEngine.AppendUnresolvedPlaceholderWarningForDisplay(null));
+        }
+
+        // ── v2（powerpoint_masking2 共有形式）の相互運用 ──
+
+        // 実際に共有される rules.json の v2 形式（PowerPoint が書き出す形）
+        private const string V2Json = @"{
+  ""version"": 2,
+  ""entries"": [
+    { ""word"": ""点検計画"", ""placeholder"": ""__業務データ_3__"", ""category"": ""業務データ"", ""meaning"": ""設備保全の年間計画"", ""aliases"": [ ""保全計画"" ], ""caseInsensitive"": false, ""enabled"": true },
+    { ""word"": ""旧システム"", ""placeholder"": ""__ITシステム_9__"", ""category"": ""ITシステム"", ""meaning"": null, ""aliases"": [], ""caseInsensitive"": false, ""enabled"": false }
+  ]
+}";
+
+        [TestMethod]
+        public void LoadV2_IsAvailable_AndDoesNotThrow()
+        {
+            File.WriteAllText(Path.Combine(_tempDir, "rules.json"), V2Json);
+            MaskingEngine.ResetInstance();
+
+            // これまで v2 を読めず「読み込みに失敗しました」で停止していた（報告バグ）
+            Assert.IsTrue(MaskingEngine.Instance.IsAvailable, MaskingEngine.Instance.AvailabilityErrorMessage);
+        }
+
+        [TestMethod]
+        public void LoadV2_Mask_MasksWordAndAlias_ToSamePlaceholder()
+        {
+            File.WriteAllText(Path.Combine(_tempDir, "rules.json"), V2Json);
+            MaskingEngine.ResetInstance();
+
+            Assert.AreEqual("__業務データ_3__を確認", MaskingEngine.Instance.Mask("点検計画を確認"));
+            // エイリアス（表記ゆれ）も同じプレースホルダーへマスクされる
+            Assert.AreEqual("__業務データ_3__を確認", MaskingEngine.Instance.Mask("保全計画を確認"));
+        }
+
+        [TestMethod]
+        public void LoadV2_Unmask_RestoresAliasToRepresentativeWord()
+        {
+            File.WriteAllText(Path.Combine(_tempDir, "rules.json"), V2Json);
+            MaskingEngine.ResetInstance();
+
+            // 「保全計画」をマスク→アンマスクすると代表表記「点検計画」へ復元される
+            string masked = MaskingEngine.Instance.Mask("保全計画を確認");
+            Assert.AreEqual("点検計画を確認", MaskingEngine.Instance.Unmask(masked));
+        }
+
+        [TestMethod]
+        public void LoadV2_DisabledEntry_IsNotMasked()
+        {
+            File.WriteAllText(Path.Combine(_tempDir, "rules.json"), V2Json);
+            MaskingEngine.ResetInstance();
+
+            // enabled=false のエントリはマスクされない（素通し）
+            Assert.AreEqual("旧システムの話", MaskingEngine.Instance.Mask("旧システムの話"));
+        }
+
+        [TestMethod]
+        public void OverrideRules_PreservesMeaningAndDisabledEntry_ForInterop()
+        {
+            File.WriteAllText(Path.Combine(_tempDir, "rules.json"), V2Json);
+            MaskingEngine.ResetInstance();
+
+            // v1 辞書管理画面からの保存を模擬：見えている有効エントリ（点検計画＋別名保全計画）だけを渡す。
+            // 無効エントリ（旧システム）と意味は UI に現れないが、共有相手のデータを壊さないよう保持されること。
+            MaskingEngine.Instance.OverrideRules(MaskingEngine.Instance.GetAllRules());
+
+            var entries = MaskingEngine.Instance.GetAllEntries();
+            var main = entries.FirstOrDefault(e => e.Placeholder == "__業務データ_3__");
+            Assert.IsNotNull(main);
+            Assert.AreEqual("設備保全の年間計画", main.Meaning, "意味が保全されること");
+            CollectionAssert.Contains(main.Aliases, "保全計画");
+
+            var disabled = entries.FirstOrDefault(e => e.Placeholder == "__ITシステム_9__");
+            Assert.IsNotNull(disabled, "無効エントリが削除されず保持されること");
+            Assert.IsFalse(disabled.Enabled);
+        }
+
+        [TestMethod]
+        public void SaveAfterLoadV2_KeepsV2FormatOnDisk()
+        {
+            File.WriteAllText(Path.Combine(_tempDir, "rules.json"), V2Json);
+            MaskingEngine.ResetInstance();
+
+            MaskingEngine.Instance.AddRule("新規語", "会社");
+
+            // 保存後もファイルは v2 形式（entries 配列）であること（v1 で上書きして共有相手を壊さない）
+            string json = File.ReadAllText(Path.Combine(_tempDir, "rules.json"));
+            StringAssert.Contains(json, "\"version\": 2");
+            StringAssert.Contains(json, "\"entries\"");
         }
 
         [TestMethod]
