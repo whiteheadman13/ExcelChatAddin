@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## ロードマップ（TODO）
+
+今後発生した TODO・機能改善は必ず以下の**永続 TODO ファイル**に追記すること。ユーザーが「TODO」と言った場合はこのファイルを指す。
+
+- **[roadmap.md](roadmap.md)** — 優先度付き TODO 一覧（`powerpoint_masking2` との差分含む）
+
+着手したら状態欄を「進行中」へ、完了後は「完了」へ更新すること。
+
 ## コミット運用
 
 作業は**意味のある変更ごとに都度コミットする**こと。複数の変更をまとめて巨大な1コミットにしない。
