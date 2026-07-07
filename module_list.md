@@ -96,7 +96,8 @@
 
 | ファイル | 役割 |
 |---|---|
-| `OfficeMasking.Core/MaskingEngine.cs` | マスキングのシングルトンエンジン。`Mask` / `Unmask` / `AddRule` / `AddRuleWithPlaceholder` / `OverrideRules` を提供。ロード失敗時は `IsAvailable=false` で書き込みを保護 |
+| `OfficeMasking.Core/MaskingEngine.cs` | マスキングのシングルトンエンジン。`Mask` / `Unmask` / `AddRule` / `AddRuleWithPlaceholder` / `OverrideRules` を提供。ロード失敗時は `IsAvailable=false` で書き込みを保護し、`Mask` も例外停止（H-2 フェイルセーフ）。送信前チェック用 `FindRegisteredWordsIn`、AI変形検出用 `FindUnresolvedPlaceholders` / `AppendUnresolvedPlaceholderWarning(ForDisplay)`（H-3）も提供 |
+| `OfficeMasking.Core/MaskingSendGuard.cs` | 外部LLM送信直前の最終セーフティネット（H-1）。ペイロードに辞書登録語が平文で残っていれば `ConfirmSendDespiteLeaks`（アプリ側の警告ダイアログ）で確認し、中止時は `OperationCanceledException` を投げる。確認関数未設定時は安全側で中止 |
 | `OfficeMasking.Core/MaskingRulesStore.cs` | `rules.json` の読み書きと50世代バックアップローテーション。保存のたびにバックアップを実行 |
 | `OfficeMasking.Core/MaskingPaths.cs` | データ保存先の決定ロジック。優先順：環境変数 `OFFICE_MASKING_DATA_DIR` > `AppData\OfficeChatMasking`。旧フォルダ（`PowerPointMasking`/DLL直下）からの自動移行も管理 |
 | `OfficeMasking.Core/DictionaryManagerLogic.cs` | フィルタ判定・削除候補抽出・バリデーション（`ValidateNewEntry`）・プレースホルダー生成（`GeneratePlaceholder`）のロジック層。UI非依存 |
@@ -112,7 +113,8 @@ MSTest テストプロジェクト。`OfficeMasking.Core` のみを対象とす�
 
 | ファイル | 役割 |
 |---|---|
-| `OfficeMasking.Core.Tests/MaskingEngineTests.cs` | `MaskingEngine` の単体テスト（Mask/Unmask/AddRule/ロード失敗保護等） |
+| `OfficeMasking.Core.Tests/MaskingEngineTests.cs` | `MaskingEngine` の単体テスト（Mask/Unmask/AddRule/ロード失敗保護/H-2 Mask停止/H-1 FindRegisteredWordsIn/H-3 未復元プレースホルダー検出等） |
+| `OfficeMasking.Core.Tests/MaskingSendGuardTests.cs` | `MaskingSendGuard` の単体テスト（平文残存の検出・確認関数の続行/中止・未設定時のフェイルセーフ中止・複数パート走査/重複排除）（H-1） |
 | `OfficeMasking.Core.Tests/MaskingRulesStoreTests.cs` | `MaskingRulesStore` の単体テスト（Load/Save/50世代バックアップ/復元/旧形式エラー） |
 | `OfficeMasking.Core.Tests/MaskingPathsTests.cs` | `MaskingPaths` の単体テスト（DataDir解決/IsDataDirEnvironmentConfigured等） |
 | `OfficeMasking.Core.Tests/DictionaryManagerLogicTests.cs` | `DictionaryManagerLogic` の単体テスト（バリデーション/プレースホルダー生成/削除候補抽出等） |

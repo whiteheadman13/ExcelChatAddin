@@ -4,6 +4,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using OfficeMasking.Core;
 
 namespace ExcelChatAddin
 {
@@ -74,6 +75,10 @@ namespace ExcelChatAddin
             var apiKey = GetApiKey();
             if (string.IsNullOrWhiteSpace(apiKey))
                 throw new Exception("環境変数 GEMINI_API_KEY が設定されていません。"); // Ensure API key is set
+
+            // H-1: 外部送信直前の最終セーフティネット。マスク呼び忘れ等で辞書登録語が平文のまま
+            // 残っていれば、ここで警告・送信中止できる（OperationCanceledException を投げる）。
+            MaskingSendGuard.EnsureSafeForExternalSend(maskedText);
 
             // if maskedText contains an explicit instruction to output Markdown table, allow Markdown in system instruction
             bool allowMarkdown = maskedText != null && maskedText.IndexOf("Markdown", StringComparison.OrdinalIgnoreCase) >= 0;

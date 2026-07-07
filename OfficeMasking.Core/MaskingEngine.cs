@@ -103,7 +103,9 @@ namespace OfficeMasking.Core
 
         public string Mask(string input)
         {
-            if (!IsAvailable || string.IsNullOrEmpty(input) || _maskDb.Count == 0) return input;
+            // 読込失敗中は辞書が空＝素通しになり機密が外部送信されるため、ここで停止する（フェイルセーフ / H-2）。
+            EnsureAvailableForMask();
+            if (string.IsNullOrEmpty(input) || _maskDb.Count == 0) return input;
 
             var sortedKeys = _maskDb.Keys.OrderByDescending(k => k.Length).ToList();
             string pattern = "(" + string.Join("|", sortedKeys.Select(k => Regex.Escape(k))) + ")";
@@ -134,6 +136,93 @@ namespace OfficeMasking.Core
         {
             if (IsAvailable) return;
             throw new InvalidOperationException(_loadFailureMessage ?? "マスキング辞書を読み込めないため保存できません。");
+        }
+
+        /// <summary>
+        /// 辞書読込に失敗している場合、Mask を例外で停止する（H-2 フェイルセーフ）。
+        /// これがないと辞書が空のまま Mask() が素通しになり、機密が未マスクで外部送信される。
+        /// </summary>
+        private void EnsureAvailableForMask()
+        {
+            if (IsAvailable) return;
+            throw new InvalidOperationException(
+                _loadFailureMessage
+                ?? "マスキング辞書を読み込めないため、機密が未マスクで送信されるのを防ぐため処理を中止しました。");
+        }
+
+        /// <summary>
+        /// テキストに含まれる登録単語（辞書キー）を列挙する。送信直前の平文残存チェック（H-1）に使う。
+        /// 辞書が読込失敗中（利用不可）の場合は判定不能のため空を返す（Mask 側で停止するため二重には止めない）。
+        /// </summary>
+        public List<string> FindRegisteredWordsIn(string text)
+        {
+            var found = new List<string>();
+            if (!IsAvailable || string.IsNullOrEmpty(text)) return found;
+
+            foreach (var key in _maskDb.Keys)
+            {
+                if (string.IsNullOrEmpty(key)) continue;
+                if (text.IndexOf(key, StringComparison.Ordinal) >= 0 && !found.Contains(key))
+                    found.Add(key);
+            }
+            return found;
+        }
+
+        // プレースホルダー形式（__カテゴリ_連番__）。カテゴリは日本語も取り得るため \S+? で受ける。
+        // LLM が大小文字を変形するケースも拾えるよう IgnoreCase。
+        private static readonly Regex PlaceholderTokenPattern =
+            new Regex(@"__\S+?_\d+__", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// Unmask 後のテキストに残った、現在の辞書で復元できないプレースホルダー形式のトークンを列挙する（H-3）。
+        /// LLM がトークンを変形・捏造した可能性の検出に使う。辞書に存在するプレースホルダーは
+        /// Unmask で復元済みのため対象外。
+        /// </summary>
+        public List<string> FindUnresolvedPlaceholders(string text)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrEmpty(text)) return result;
+
+            var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var ph in _maskDb.Values)
+            {
+                if (!string.IsNullOrWhiteSpace(ph)) known.Add(ph);
+            }
+
+            foreach (Match m in PlaceholderTokenPattern.Matches(text))
+            {
+                if (known.Contains(m.Value)) continue;
+                if (!result.Contains(m.Value)) result.Add(m.Value);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Unmask 済みテキストに未復元プレースホルダーが残っていれば、末尾へ警告文を付加して返す（表示用 / H-3）。
+        /// 該当がなければ入力をそのまま返す。
+        /// </summary>
+        public string AppendUnresolvedPlaceholderWarning(string unmaskedText)
+        {
+            if (string.IsNullOrEmpty(unmaskedText)) return unmaskedText;
+            var unresolved = FindUnresolvedPlaceholders(unmaskedText);
+            if (unresolved.Count == 0) return unmaskedText;
+
+            return unmaskedText
+                + "\n\n⚠ 復元できないプレースホルダーが残っています（AIがマスク記号を変形・捏造した可能性があります）: "
+                + string.Join(", ", unresolved);
+        }
+
+        /// <summary>表示直前の応答テキストへ未復元プレースホルダー警告を付加する（UI 用の安全ラッパー / H-3）。</summary>
+        public static string AppendUnresolvedPlaceholderWarningForDisplay(string unmaskedText)
+        {
+            try
+            {
+                return Instance.AppendUnresolvedPlaceholderWarning(unmaskedText);
+            }
+            catch
+            {
+                return unmaskedText;
+            }
         }
 
         private void LoadRules()

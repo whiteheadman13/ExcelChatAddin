@@ -673,8 +673,10 @@ namespace ExcelChatAddin
                     var response = await client.SendAsync(masked, _selectedModel);
                     DebugLogger.LogInfo("Received response from Gemini (raw length: " + (response?.Length ?? 0) + ")");
 
-                    // 受信したレスポンスをアンマスクしてから表示する
-                    unmaskedResponse = MaskingEngine.Instance.Unmask(response);
+                    // 受信したレスポンスをアンマスクしてから表示する。
+                    // H-3: AIがマスク記号を変形・捏造して復元できないプレースホルダーが残った場合は警告を付加する。
+                    unmaskedResponse = MaskingEngine.AppendUnresolvedPlaceholderWarningForDisplay(
+                        MaskingEngine.Instance.Unmask(response));
                     _lastGeminiResponse = unmaskedResponse ?? "";
 
                     Dispatcher.Invoke(() =>

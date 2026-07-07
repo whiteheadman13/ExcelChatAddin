@@ -257,6 +257,116 @@ namespace OfficeMasking.Core.Tests
             MaskingEngine.Instance.AddRule("ログテスト", "LOG");
         }
 
+        // ── H-2: 読込失敗時に Mask を停止するフェイルセーフ ──
+
+        [TestMethod]
+        [ExpectedException(typeof(InvalidOperationException))]
+        public void Mask_WhenUnavailable_Throws()
+        {
+            File.WriteAllText(Path.Combine(_tempDir, "rules.json"), "NOT_JSON!!!");
+            MaskingEngine.ResetInstance();
+
+            Assert.IsFalse(MaskingEngine.Instance.IsAvailable);
+            // 素通しではなく例外で停止すること（機密が未マスクで送信されるのを防ぐ）
+            MaskingEngine.Instance.Mask("山田太郎の連絡先");
+        }
+
+        [TestMethod]
+        public void Mask_WhenAvailableButNoRules_ReturnsInput()
+        {
+            // 正常だが辞書が空 → 素通しでよい（フェイルセーフの対象は「読込失敗」）
+            Assert.IsTrue(MaskingEngine.Instance.IsAvailable);
+            Assert.AreEqual("そのまま", MaskingEngine.Instance.Mask("そのまま"));
+        }
+
+        // ── H-1: 送信前の平文残存チェック用（FindRegisteredWordsIn） ──
+
+        [TestMethod]
+        public void FindRegisteredWordsIn_ReturnsWordsPresentInText()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名");
+            MaskingEngine.Instance.AddRule("東京都", "住所");
+
+            var found = MaskingEngine.Instance.FindRegisteredWordsIn("山田太郎の住所は東京都です");
+            CollectionAssert.AreEquivalent(new[] { "山田太郎", "東京都" }, found);
+        }
+
+        [TestMethod]
+        public void FindRegisteredWordsIn_NoMatch_ReturnsEmpty()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名");
+
+            Assert.AreEqual(0, MaskingEngine.Instance.FindRegisteredWordsIn("__人名_1__のみ").Count);
+            Assert.AreEqual(0, MaskingEngine.Instance.FindRegisteredWordsIn("").Count);
+            Assert.AreEqual(0, MaskingEngine.Instance.FindRegisteredWordsIn(null).Count);
+        }
+
+        [TestMethod]
+        public void FindRegisteredWordsIn_WhenUnavailable_ReturnsEmpty()
+        {
+            File.WriteAllText(Path.Combine(_tempDir, "rules.json"), "NOT_JSON!!!");
+            MaskingEngine.ResetInstance();
+
+            Assert.IsFalse(MaskingEngine.Instance.IsAvailable);
+            Assert.AreEqual(0, MaskingEngine.Instance.FindRegisteredWordsIn("山田太郎").Count);
+        }
+
+        // ── H-3: 未復元プレースホルダーの検出・警告 ──
+
+        [TestMethod]
+        public void FindUnresolvedPlaceholders_DetectsMangledJapanesePlaceholder()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名"); // → __人名_1__
+
+            // LLM が連番を捏造したケース（__人名_2__ は辞書に無い）
+            var unresolved = MaskingEngine.Instance.FindUnresolvedPlaceholders("復元後テキスト __人名_2__ が残存");
+            CollectionAssert.Contains(unresolved, "__人名_2__");
+        }
+
+        [TestMethod]
+        public void FindUnresolvedPlaceholders_KnownPlaceholderIsExcluded()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名"); // → __人名_1__
+
+            var unresolved = MaskingEngine.Instance.FindUnresolvedPlaceholders("これは __人名_1__ です");
+            Assert.AreEqual(0, unresolved.Count);
+        }
+
+        [TestMethod]
+        public void FindUnresolvedPlaceholders_PlainTextWithoutPlaceholderShape_ReturnsEmpty()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名");
+
+            // __foo_bar__ は末尾が _連番 でないためプレースホルダー形とみなさない
+            Assert.AreEqual(0, MaskingEngine.Instance.FindUnresolvedPlaceholders("__foo_bar__ 普通の文章").Count);
+        }
+
+        [TestMethod]
+        public void AppendUnresolvedPlaceholderWarning_AppendsWhenUnresolved()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名");
+
+            var result = MaskingEngine.Instance.AppendUnresolvedPlaceholderWarning("本文 __人名_9__");
+            StringAssert.Contains(result, "本文 __人名_9__");
+            StringAssert.Contains(result, "復元できないプレースホルダー");
+            StringAssert.Contains(result, "__人名_9__");
+        }
+
+        [TestMethod]
+        public void AppendUnresolvedPlaceholderWarning_NoChangeWhenClean()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名");
+
+            var text = "きれいに復元された文章です";
+            Assert.AreEqual(text, MaskingEngine.Instance.AppendUnresolvedPlaceholderWarning(text));
+        }
+
+        [TestMethod]
+        public void AppendUnresolvedPlaceholderWarningForDisplay_NullSafe()
+        {
+            Assert.IsNull(MaskingEngine.AppendUnresolvedPlaceholderWarningForDisplay(null));
+        }
+
         [TestMethod]
         public void LoadRules_WhenRulesDeleted_RestoresFromBak1()
         {

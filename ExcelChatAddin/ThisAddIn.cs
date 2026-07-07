@@ -74,6 +74,9 @@ namespace ExcelChatAddin
             Paths.InitLegacyDllDirectory();
             MaskingEngine.SetLogger(DebugMaskingLogger.Instance);
 
+            // H-1: 外部送信直前ガードの警告ダイアログを差し込む（未マスクの登録語を検出した場合）。
+            MaskingSendGuard.ConfirmSendDespiteLeaks = ShowSendLeakConfirmDialog;
+
             PurgeMaskMenus();     // 全掃除
 
             AddMaskManageMenu();  // ★通常モード専用
@@ -109,6 +112,24 @@ namespace ExcelChatAddin
         private void ShowMaskingUnavailableMessage(string title)
         {
             MessageBox.Show(BuildMaskingUnavailableMessage(), title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        /// <summary>
+        /// H-1: 送信直前ガードが平文残存を検出したときの確認ダイアログ。
+        /// 「はい」で送信続行、「いいえ」で中止（MaskingSendGuard が送信を止める）。
+        /// </summary>
+        private bool ShowSendLeakConfirmDialog(System.Collections.Generic.IReadOnlyList<string> leakedWords)
+        {
+            string words = string.Join(", ", leakedWords);
+            var result = MessageBox.Show(
+                "外部LLM（Gemini）へ送信する内容に、マスキング辞書の登録単語が未マスクのまま含まれています。\n\n"
+                + "検出された単語: " + words + "\n\n"
+                + "このまま送信すると機密情報が外部へ送られる可能性があります。送信を続行しますか？",
+                "マスキング警告（送信前チェック）",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            return result == DialogResult.Yes;
         }
 
         private bool EnsureMaskingAvailable(string title)
