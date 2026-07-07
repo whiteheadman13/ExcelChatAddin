@@ -623,6 +623,25 @@ namespace ExcelChatAddin
             }
         }
 
+        /// <summary>
+        /// デバッグ用: マスク→送信→アンマスクの往復を目視確認するフォームを開く。
+        /// </summary>
+        public void ShowMaskingDebug()
+        {
+            try
+            {
+                var owner = new Win32Window(new IntPtr(this.Application.Hwnd));
+                using (var dlg = new MaskingDebugForm())
+                {
+                    dlg.ShowDialog(owner);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "マスキング診断（デバッグ）");
+            }
+        }
+
         public void ShowTableSchemaSettings()
         {
             try

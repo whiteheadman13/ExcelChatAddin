@@ -87,6 +87,7 @@
 | `ExcelChatAddin/Win32Window.cs` | Win32 ウィンドウハンドルを `IWin32Window` として扱うラッパー（ダイアログのオーナー指定用） |
 | `ExcelChatAddin/DebugLogger.cs` | `Debug.WriteLine` ラッパー |
 | `ExcelChatAddin/DiffPreviewDialog.cs` | 差分プレビューダイアログ |
+| `ExcelChatAddin/MaskingDebugForm.cs` | デバッグ専用フォーム（リボン「デバッグ」グループから起動）。元テキスト→マスク→（Gemini送信）→アンマスクの往復を段階表示。マスク往復一致・送信前ガード（H-1）・未復元プレースホルダー（H-3）・Mask停止（H-2）を目視確認できる |
 
 ---
 

@@ -40,3 +40,4 @@
 |---|---|---|---|---|
 | E-1 | 完了 | 環境整備 | **`.claude/settings.local.json` を追加** | PowerPoint 側 `.claude` を踏襲し、MSBuild ビルド・`dotnet test` の権限許可リストを Excel 用に追加。 |
 | E-2 | 未着手 | ドキュメント | **docs/ 一式の整備検討** | PowerPoint は `docs/`（システム機能一覧・MethodOverview・MaskingSpecification・プロンプト一覧）を持つ。Excel にも必要になれば追加。 |
+| E-3 | ✅ 完了 | デバッグ機能 | **マスキング診断フォームを追加** | リボンに「デバッグ」グループを新設し「マスキング診断」ボタンを追加。元テキスト→マスク→（Gemini送信）→アンマスクの往復を1画面で段階表示し、往復一致・送信前ガード(H-1)・未復元プレースホルダー(H-3)・Mask停止(H-2)を目視確認できる。`ExcelChatAddin/MaskingDebugForm.cs` |

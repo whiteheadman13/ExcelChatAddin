@@ -209,6 +209,9 @@
       <SubType>Form</SubType>
     </Compile>
     <Compile Include="GeminiClient.cs" />
+    <Compile Include="MaskingDebugForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="GeminiDtos.cs" />
     <Compile Include="OllamaClient.cs" />
     <Compile Include="GeminiResponseWindow.xaml.cs">
