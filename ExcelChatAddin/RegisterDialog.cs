@@ -16,9 +16,12 @@ namespace ExcelChatAddin
         public string SelectedPlaceholder { get; private set; }
         public bool IsNewCategory { get; private set; }
         public string TargetText { get; private set; }
+        /// <summary>登録する意味（任意・M-5）。未入力なら空文字。</summary>
+        public string SelectedMeaning { get; private set; }
 
         // UIパーツ
         private TextBox _txtTarget;
+        private TextBox _txtMeaning;
         private ComboBox _cmbNewCategory; // ★TextBoxからComboBoxに変更（履歴用）
         private ComboBox _cmbExisting;
         private RadioButton _rbNew;
@@ -167,11 +170,18 @@ namespace ExcelChatAddin
             }
             catch { }
 
+            // --- B'. 意味（任意・共通） ---
+            var lblMeaning = new Label { Text = "意味(任意):", Location = new Point(20, 197), AutoSize = true };
+            _txtMeaning = new TextBox { Location = new Point(100, 194), Width = 320 };
+            var ttMeaning = new ToolTip();
+            ttMeaning.SetToolTip(_txtMeaning,
+                "機密を含まない説明（例: 取引先企業名）。AIへの文脈ヒントとして送信されます（設定でON/OFF）。");
+
             // --- C. ボタンエリア ---
-            var btnOk = new Button { 
-                Text = "登録", 
-                Location = new Point(230, 240), 
-                DialogResult = DialogResult.OK 
+            var btnOk = new Button {
+                Text = "登録",
+                Location = new Point(230, 240),
+                DialogResult = DialogResult.OK
             };
             
             // OK時の処理
@@ -182,6 +192,7 @@ namespace ExcelChatAddin
                 }
 
                 this.IsNewCategory = _rbNew.Checked;
+                this.SelectedMeaning = _txtMeaning.Text?.Trim() ?? "";
 
                 if (this.IsNewCategory)
                 {
@@ -208,11 +219,12 @@ namespace ExcelChatAddin
                 DialogResult = DialogResult.Cancel 
             };
 
-            this.Controls.AddRange(new Control[] { 
-                lblTargetCaption, targetControl, 
+            this.Controls.AddRange(new Control[] {
+                lblTargetCaption, targetControl,
                 _rbNew, lblCatName, _cmbNewCategory, _chkSaveCategory, _btnDeleteCategory,
-                _rbExisting, lblExistName, _cmbExisting, 
-                btnOk, btnCancel 
+                _rbExisting, lblExistName, _cmbExisting,
+                lblMeaning, _txtMeaning,
+                btnOk, btnCancel
             });
 
             this.AcceptButton = btnOk;

@@ -274,9 +274,9 @@ namespace ExcelChatAddin
                     if (r != DialogResult.OK) return;
 
                     if (dlg.IsNewCategory)
-                        MaskingEngine.Instance.AddRule(selected, dlg.SelectedCategory);
+                        MaskingEngine.Instance.AddRule(selected, dlg.SelectedCategory, dlg.SelectedMeaning);
                     else
-                        MaskingEngine.Instance.AddRuleWithPlaceholder(selected, dlg.SelectedPlaceholder);
+                        MaskingEngine.Instance.AddRuleWithPlaceholder(selected, dlg.SelectedPlaceholder, dlg.SelectedMeaning);
                 }
             }
             catch (Exception ex)

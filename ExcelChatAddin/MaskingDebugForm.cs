@@ -184,6 +184,16 @@ namespace ExcelChatAddin
             AppendLine(unresolved.Count == 0
                 ? "OK: 未復元プレースホルダーなし。"
                 : "⚠ 未復元: " + string.Join(", ", unresolved));
+
+            AppendSection("⑥ 意味ヒント（送信時に付加・M-2）");
+            bool hintOn = AddinConfig.GetMaskingMeaningHintEnabled();
+            string hint = MaskingEngine.Instance.BuildMeaningHintBlock(masked);
+            if (!hintOn)
+                AppendLine("設定 OFF（意味ヒントは送信されません）");
+            else if (string.IsNullOrEmpty(hint))
+                AppendLine("該当する意味付きプレースホルダーなし（このテキストでは送信されません）");
+            else
+                AppendLine(hint);
         }
 
         private async System.Threading.Tasks.Task SendRoundTripAsync()

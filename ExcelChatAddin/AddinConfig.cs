@@ -14,6 +14,9 @@ namespace ExcelChatAddin
     {
         private const string KeyOllamaBaseUrl = "ollamaBaseUrl";
         private const string KeyLastModel = "lastModel";
+        // powerpoint_masking2 と config.json を共有するため、キー名は PowerPoint の
+        // AppSettings.MaskingMeaningHintEnabled（PascalCase）に一致させる。
+        private const string KeyMaskingMeaningHintEnabled = "MaskingMeaningHintEnabled";
 
         private static JObject Load()
         {
@@ -72,6 +75,25 @@ namespace ExcelChatAddin
             if (string.IsNullOrWhiteSpace(model)) return;
             var jo = Load();
             jo[KeyLastModel] = model;
+            Save(jo);
+        }
+
+        /// <summary>
+        /// マスク語の意味ヒントを外部LLMへ送るか（M-2）。未設定なら既定 true
+        /// （PowerPoint の既定と一致。config.json は両ツールで共有）。
+        /// </summary>
+        public static bool GetMaskingMeaningHintEnabled()
+        {
+            var token = Load()[KeyMaskingMeaningHintEnabled];
+            if (token == null || token.Type == JTokenType.Null) return true;
+            try { return token.Value<bool>(); }
+            catch { return true; }
+        }
+
+        public static void SetMaskingMeaningHintEnabled(bool enabled)
+        {
+            var jo = Load();
+            jo[KeyMaskingMeaningHintEnabled] = enabled;
             Save(jo);
         }
     }

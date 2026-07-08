@@ -456,6 +456,107 @@ namespace OfficeMasking.Core.Tests
             StringAssert.Contains(json, "\"entries\"");
         }
 
+        // ── M-5: 意味(meaning)の登録・更新 ──
+
+        [TestMethod]
+        public void AddRule_WithMeaning_StoresMeaning()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名", "営業部の担当者");
+
+            var entry = MaskingEngine.Instance.GetAllEntries().Single();
+            Assert.AreEqual("営業部の担当者", entry.Meaning);
+        }
+
+        [TestMethod]
+        public void AddRule_BlankMeaning_StoredAsNull()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名", "   ");
+            Assert.IsNull(MaskingEngine.Instance.GetAllEntries().Single().Meaning);
+        }
+
+        [TestMethod]
+        public void AddRuleWithPlaceholder_MeaningFillsWhenEmpty_DoesNotOverwrite()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名", "既存の意味"); // __人名_1__
+            // 既存プレースホルダーへ別表記を追加（意味は上書きしない）
+            MaskingEngine.Instance.AddRuleWithPlaceholder("ヤマダ", "__人名_1__", "別の意味");
+
+            var entry = MaskingEngine.Instance.GetAllEntries().Single();
+            Assert.AreEqual("既存の意味", entry.Meaning);
+            CollectionAssert.Contains(entry.Aliases, "ヤマダ");
+        }
+
+        [TestMethod]
+        public void UpdateMeanings_UpdatesByPlaceholder_AndPersists()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名"); // __人名_1__
+
+            MaskingEngine.Instance.UpdateMeanings(new Dictionary<string, string> { { "__人名_1__", "営業部の担当者" } });
+
+            Assert.AreEqual("営業部の担当者", MaskingEngine.Instance.GetAllEntries().Single().Meaning);
+
+            // 永続化されていること（読み直し）
+            MaskingEngine.ResetInstance();
+            Assert.AreEqual("営業部の担当者", MaskingEngine.Instance.GetAllEntries().Single().Meaning);
+        }
+
+        [TestMethod]
+        public void UpdateMeanings_EmptyClearsMeaning()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名", "元の意味");
+            MaskingEngine.Instance.UpdateMeanings(new Dictionary<string, string> { { "__人名_1__", "" } });
+            Assert.IsNull(MaskingEngine.Instance.GetAllEntries().Single().Meaning);
+        }
+
+        [TestMethod]
+        public void GetMeaningsByPlaceholder_ReturnsOnlyThoseWithMeaning()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名", "担当者");
+            MaskingEngine.Instance.AddRule("東京都", "住所"); // 意味なし
+
+            var map = MaskingEngine.Instance.GetMeaningsByPlaceholder();
+            Assert.AreEqual(1, map.Count);
+            Assert.AreEqual("担当者", map["__人名_1__"]);
+        }
+
+        // ── M-2: 意味ヒントブロックの生成 ──
+
+        [TestMethod]
+        public void BuildMeaningHintBlock_IncludesMeaningForPresentPlaceholders()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名", "営業部の担当者");
+            string masked = MaskingEngine.Instance.Mask("山田太郎の営業状況"); // __人名_1__の営業状況
+
+            string hint = MaskingEngine.Instance.BuildMeaningHintBlock(masked);
+            StringAssert.Contains(hint, "文脈ヒント");
+            StringAssert.Contains(hint, "__人名_1__: 営業部の担当者");
+        }
+
+        [TestMethod]
+        public void BuildMeaningHintBlock_EmptyWhenNoMeaningOrPlaceholderAbsent()
+        {
+            MaskingEngine.Instance.AddRule("山田太郎", "人名", "営業部の担当者");
+            // マスク済みテキストに __人名_1__ が無ければヒントは空
+            Assert.AreEqual("", MaskingEngine.Instance.BuildMeaningHintBlock("無関係な文章"));
+
+            // 意味なしならヒントは空
+            MaskingEngine.ResetInstance();
+            MaskingEngine.Instance.AddRule("東京都", "住所");
+            var masked = MaskingEngine.Instance.Mask("東京都に住む");
+            Assert.AreEqual("", MaskingEngine.Instance.BuildMeaningHintBlock(masked));
+        }
+
+        [TestMethod]
+        public void BuildMeaningHintBlock_ReMasksSecretInsideMeaningText()
+        {
+            // 意味の説明文に別の登録語が混入しても、ブロックは再マスクされ平文にならない
+            MaskingEngine.Instance.AddRule("極秘案件", "案件", "取引先である極秘案件の内部名");
+            var masked = MaskingEngine.Instance.Mask("極秘案件について");
+
+            string hint = MaskingEngine.Instance.BuildMeaningHintBlock(masked);
+            Assert.IsFalse(hint.Contains("極秘案件"), "意味欄に含まれる登録語も再マスクされること");
+        }
+
         [TestMethod]
         public void LoadRules_WhenRulesDeleted_RestoresFromBak1()
         {

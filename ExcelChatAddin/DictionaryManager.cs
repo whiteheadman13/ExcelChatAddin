@@ -20,6 +20,8 @@ namespace ExcelChatAddin
         private Button _btnAdd;
         private Button _btnOpenFolder;
         private Dictionary<string, string> _originalData;
+        // プレースホルダー→意味（M-5）。列編集を保持し、保存時に UpdateMeanings で反映する。
+        private Dictionary<string, string> _meaningsByPlaceholder = new Dictionary<string, string>(StringComparer.Ordinal);
 
         public DictionaryManager()
         {
@@ -51,8 +53,10 @@ namespace ExcelChatAddin
             };
             _grid.Columns.Add("Original", "元の単語");
             _grid.Columns.Add("Placeholder", "置換後の記号");
+            _grid.Columns.Add("Meaning", "意味(任意)");
             _grid.Columns[0].ReadOnly = true;
             _grid.Columns[1].ReadOnly = false;
+            _grid.Columns[2].ReadOnly = false;
             _grid.EditMode = DataGridViewEditMode.EditOnKeystrokeOrF2;
 
             var pnlBottom = new Panel { Dock = DockStyle.Bottom, Height = 50 };
@@ -88,6 +92,7 @@ namespace ExcelChatAddin
         private void LoadData()
         {
             _originalData = MaskingEngine.Instance.GetAllRules();
+            _meaningsByPlaceholder = MaskingEngine.Instance.GetMeaningsByPlaceholder();
 
             var categories = new HashSet<string>();
             foreach (var val in _originalData.Values)
@@ -113,8 +118,23 @@ namespace ExcelChatAddin
             return m.Success ? m.Groups["cat"].Value : "";
         }
 
+        /// <summary>現在グリッドに表示中の意味編集を _meaningsByPlaceholder へ取り込む（フィルタ切替・保存前に呼ぶ）。</summary>
+        private void CaptureGridMeanings()
+        {
+            if (_grid.Columns.Count < 3) return;
+            foreach (DataGridViewRow row in _grid.Rows)
+            {
+                if (row.IsNewRow) continue;
+                string placeholder = row.Cells[1].Value?.ToString();
+                if (string.IsNullOrWhiteSpace(placeholder)) continue;
+                string meaning = row.Cells[2].Value?.ToString()?.Trim() ?? "";
+                _meaningsByPlaceholder[placeholder] = meaning;
+            }
+        }
+
         private void ApplyFilter()
         {
+            CaptureGridMeanings();
             _grid.Rows.Clear();
             string selectedCat = _cmbFilter.SelectedItem?.ToString();
             string searchText = _txtSearch.Text.Trim();
@@ -139,7 +159,8 @@ namespace ExcelChatAddin
 
                 if (catMatch && textMatch)
                 {
-                    _grid.Rows.Add(original, placeholder);
+                    _meaningsByPlaceholder.TryGetValue(placeholder, out var meaning);
+                    _grid.Rows.Add(original, placeholder, meaning ?? "");
                 }
             }
         }
@@ -229,7 +250,10 @@ namespace ExcelChatAddin
                     foreach (string k in keysToRemove) _originalData.Remove(k);
                 }
 
+                CaptureGridMeanings();
                 MaskingEngine.Instance.OverrideRules(new Dictionary<string, string>(_originalData));
+                // v2 メタデータ：意味をプレースホルダー単位で反映（OverrideRules 後にエントリが確定してから）
+                MaskingEngine.Instance.UpdateMeanings(_meaningsByPlaceholder);
                 MessageBox.Show("保存しました。");
             }
             catch (Exception ex)

@@ -668,6 +668,10 @@ namespace ExcelChatAddin
                     var masked = MaskingEngine.Instance.Mask(payload);
                     // 今回は payload 自体は既に BuildMaskedPayload 内でマスク済みだが保険として再マスク。
 
+                    // M-2: マスク語の意味ヒントを付加（設定 ON のとき）。ヒント自体も再マスク済みで平文漏れなし。
+                    if (AddinConfig.GetMaskingMeaningHintEnabled())
+                        masked += MaskingEngine.Instance.BuildMeaningHintBlock(masked);
+
                     var client = new GeminiClient();
                     DebugLogger.LogInfo("Sending to Gemini...");
                     var response = await client.SendAsync(masked, _selectedModel);
@@ -689,6 +693,8 @@ namespace ExcelChatAddin
                     sendForValidation = async prompt =>
                     {
                         var m = MaskingEngine.Instance.Mask(prompt);
+                        if (AddinConfig.GetMaskingMeaningHintEnabled())
+                            m += MaskingEngine.Instance.BuildMeaningHintBlock(m);
                         var r = await client.SendAsync(m, _selectedModel);
                         return MaskingEngine.Instance.Unmask(r);
                     };
@@ -1930,7 +1936,7 @@ namespace ExcelChatAddin
 
                     if (dlg.IsNewCategory)
                     {
-                        MaskingEngine.Instance.AddRule(selected, dlg.SelectedCategory);
+                        MaskingEngine.Instance.AddRule(selected, dlg.SelectedCategory, dlg.SelectedMeaning);
 
                         // 追加されたプレースホルダを取り出す
                         var rules = MaskingEngine.Instance.GetAllRules();
@@ -1950,7 +1956,7 @@ namespace ExcelChatAddin
                             return;
                         }
 
-                        MaskingEngine.Instance.AddRuleWithPlaceholder(selected, placeholder);
+                        MaskingEngine.Instance.AddRuleWithPlaceholder(selected, placeholder, dlg.SelectedMeaning);
                     }
 
                     // 選択文字列をプレースホルダに置換

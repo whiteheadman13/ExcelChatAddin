@@ -22,10 +22,10 @@
 | # | 状態 | 種別 | 項目 | 内容・PowerPoint 側の参照 |
 |---|---|---|---|---|
 | M-1 | ✅ 完了 | 機能追加 | **rules.json v2（MaskingRule）へ移行** | ⚠**共有 rules.json が PowerPoint により v2 化され、Excel が読込失敗でクラッシュしたため緊急対応**。`MaskingRule`/`MaskingRuleFile` を Core へ移植し、`MaskingRulesStore`/`MaskingEngine` を v2（エントリ）ベースへ全面改修。エイリアス・意味・有効フラグ・大小文字区別に対応。互換 Dictionary API は v2 メタデータ・無効エントリを保全して更新（共有相手のデータを壊さない）。実データ102件の読込を確認。参照: `powerpoint_masking2/MaskingRule.cs`, `MaskingEngine.cs` |
-| M-2 | 未着手 | 機能追加 | **意味ヒント送信（BuildMeaningHintBlock / AppendMeaningHintsForSend）** | マスク語の「意味」を機密を含めずに LLM へ渡し理解を助ける。設定で ON/OFF。Excel は未対応（v2 前提）。参照: `powerpoint_masking2/MaskingEngine.cs:389,508` |
+| M-2 | ✅ 完了 | 機能追加 | **意味ヒント送信（BuildMeaningHintBlock）** | `MaskingEngine.BuildMeaningHintBlock(masked)` を追加。送信テキスト内に現れるプレースホルダーのうち意味付き・有効なものだけ「【マスク語の文脈ヒント】」ブロックにまとめ、**機密漏洩防止のため生成後に再マスクして**付加する。Gemini 送信経路（`ChatView` 本送信・検証ループ）で `AddinConfig.GetMaskingMeaningHintEnabled()`（既定 ON）が真のとき付加。**Ollama は対象外**。デバッグフォーム⑥で目視確認可。参照: `powerpoint_masking2/MaskingEngine.cs:389,508` |
 | M-3 | 未着手 | 機能追加 | **@トークン保護マスキング（MaskExcludingAtTokens 相当）** | Excel は `@range(...)` を独自処理しているが、PowerPoint 型の「@token を退避→マスク→復元」の汎用ガードは無い。@range 解決経路の取りこぼし確認と統一。参照: `powerpoint_masking2/MaskingEngine.cs:325`, `ExcelChatAddin/ChatView.xaml.cs:67,479` |
 | M-4 | ✅ 完了 | 機能追加 | **Unmask の大小文字非区別フォールバック** | M-1 の v2 化と同時に `Unmask()` へ大小文字非区別の再置換フォールバックを実装済み。参照: `OfficeMasking.Core/MaskingEngine.cs` |
-| M-5 | 未着手 | 機能追加 | **辞書登録UIの意味(meaning)入力・編集対応** | エイリアスは `RegisterDialog` の「既存タグに紐付け(表記揺れ)」で登録可（v2化で対応済み）。一方**意味(meaning)は入力欄が無く Excel から登録・編集できない**。`RegisterDialog` に意味入力欄、`DictionaryManager` に意味列（＋できれば有効/無効トグル・別名の明示表示）を追加する。PowerPoint 登録分の意味は保持済み。M-2（意味の送信）と併せて価値が出る。参照: `ExcelChatAddin/RegisterDialog.cs`, `DictionaryManager.cs`, `powerpoint_masking2/DictionaryManager.cs` |
+| M-5 | ✅ 完了 | 機能追加 | **辞書登録UIの意味(meaning)入力・編集対応** | `RegisterDialog` に意味入力欄を追加（`SelectedMeaning`）。3つの登録経路（ホットキー登録・`MaskPreviewWindow`・`DictionaryManager` 新規登録）から意味を渡す。`MaskingEngine.AddRule`/`AddRuleWithPlaceholder` に meaning オーバーロード、`UpdateMeanings`/`GetMeaningsByPlaceholder` を追加。`DictionaryManager` に「意味(任意)」列を追加し編集→保存で反映。PowerPoint 登録分の意味も保持。M-2（意味の送信）と連動。参照: `ExcelChatAddin/RegisterDialog.cs`, `DictionaryManager.cs`, `powerpoint_masking2/DictionaryManager.cs` |
 
 ## 優先度：低（LLM プロバイダ拡充）
 

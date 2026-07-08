@@ -48,6 +48,10 @@ namespace OfficeMasking.Core
         // ── 登録 ──
 
         public void AddRule(string original, string category)
+            => AddRule(original, category, null);
+
+        /// <summary>意味（Meaning）付きでルールを追加する（M-5）。</summary>
+        public void AddRule(string original, string category, string meaning)
         {
             EnsureAvailableForWrite();
             if (string.IsNullOrWhiteSpace(original) || ContainsRule(original)) return;
@@ -68,16 +72,21 @@ namespace OfficeMasking.Core
                 Word = original,
                 Placeholder = placeholder,
                 Category = cleanCategory,
+                Meaning = NormalizeMeaning(meaning),
                 Enabled = true,
             });
             SaveRules();
         }
 
+        public void AddRuleWithPlaceholder(string original, string placeholder)
+            => AddRuleWithPlaceholder(original, placeholder, null);
+
         /// <summary>
         /// 既存プレースホルダーを指定してルールを追加する。
         /// 同じプレースホルダーのエントリが既にあれば、そのエイリアス（表記ゆれ）として追加する。
+        /// 意味（Meaning）は、既存エントリに未設定のときのみ補完する（M-5）。
         /// </summary>
-        public void AddRuleWithPlaceholder(string original, string placeholder)
+        public void AddRuleWithPlaceholder(string original, string placeholder, string meaning)
         {
             EnsureAvailableForWrite();
             if (string.IsNullOrWhiteSpace(original) || string.IsNullOrWhiteSpace(placeholder)) return;
@@ -88,6 +97,8 @@ namespace OfficeMasking.Core
             {
                 if (existing.Aliases == null) existing.Aliases = new List<string>();
                 existing.Aliases.Add(original);
+                if (string.IsNullOrWhiteSpace(existing.Meaning))
+                    existing.Meaning = NormalizeMeaning(meaning);
             }
             else
             {
@@ -96,10 +107,51 @@ namespace OfficeMasking.Core
                     Word = original,
                     Placeholder = placeholder,
                     Category = MaskingRuleFile.ExtractCategory(placeholder),
+                    Meaning = NormalizeMeaning(meaning),
                     Enabled = true,
                 });
             }
             SaveRules();
+        }
+
+        private static string NormalizeMeaning(string meaning)
+            => string.IsNullOrWhiteSpace(meaning) ? null : meaning.Trim();
+
+        /// <summary>
+        /// プレースホルダー単位で意味（Meaning）を一括更新して保存する（辞書管理画面の保存用 / M-5）。
+        /// マップに現れないプレースホルダーの意味は変更しない。
+        /// </summary>
+        public void UpdateMeanings(IDictionary<string, string> meaningByPlaceholder)
+        {
+            EnsureAvailableForWrite();
+            if (meaningByPlaceholder == null || meaningByPlaceholder.Count == 0) return;
+
+            bool changed = false;
+            foreach (var e in _entries)
+            {
+                if (string.IsNullOrWhiteSpace(e.Placeholder)) continue;
+                if (!meaningByPlaceholder.TryGetValue(e.Placeholder, out var m)) continue;
+
+                var norm = NormalizeMeaning(m);
+                if (!string.Equals(e.Meaning, norm, StringComparison.Ordinal))
+                {
+                    e.Meaning = norm;
+                    changed = true;
+                }
+            }
+            if (changed) SaveRules();
+        }
+
+        /// <summary>プレースホルダー→意味 のマップを返す（辞書管理画面の表示用 / M-5）。意味が空のものは含めない。</summary>
+        public Dictionary<string, string> GetMeaningsByPlaceholder()
+        {
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var e in _entries)
+            {
+                if (string.IsNullOrWhiteSpace(e.Placeholder) || string.IsNullOrWhiteSpace(e.Meaning)) continue;
+                if (!result.ContainsKey(e.Placeholder)) result.Add(e.Placeholder, e.Meaning);
+            }
+            return result;
         }
 
         public bool ContainsRule(string original)
@@ -373,6 +425,36 @@ namespace OfficeMasking.Core
             {
                 return unmaskedText;
             }
+        }
+
+        // ── M-2: マスク語の意味ヒント送信 ──
+
+        /// <summary>
+        /// マスク済みテキストに含まれるプレースホルダーのうち、意味（Meaning）が設定されているものを
+        /// 機密を含まない文脈ヒントのブロックとして返す。該当がなければ空文字列。
+        /// 意味の説明文に登録単語（機密）が書かれていても平文で外部送信しないよう、
+        /// ブロック全体を再マスクしてから返す。
+        /// </summary>
+        public string BuildMeaningHintBlock(string maskedText)
+        {
+            if (string.IsNullOrEmpty(maskedText) || _entries.Count == 0) return "";
+
+            var lines = new List<string>();
+            foreach (var e in _entries)
+            {
+                if (!e.Enabled) continue;
+                if (string.IsNullOrWhiteSpace(e.Meaning) || string.IsNullOrWhiteSpace(e.Placeholder)) continue;
+                if (maskedText.IndexOf(e.Placeholder, StringComparison.Ordinal) < 0) continue;
+                lines.Add("- " + e.Placeholder + ": " + e.Meaning.Trim());
+            }
+            if (lines.Count == 0) return "";
+
+            string hint = "\n\n【マスク語の文脈ヒント】\n"
+                + "以下のプレースホルダーは機密情報のマスクです。内容理解の参考にし、プレースホルダー自体は一切変更・省略しないこと。\n"
+                + string.Join("\n", lines);
+
+            // 意味の説明文に登録単語が含まれるケースの漏洩防止（プレースホルダーは Mask 対象外なのでそのまま残る）
+            return Mask(hint);
         }
 
         // ── 内部 ──
