@@ -32,7 +32,6 @@ namespace ExcelChatAddin
         public LlmSettingsDialog()
         {
             Text = "LLM プロバイダ設定";
-            Size = new Size(520, 360);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -105,13 +104,16 @@ namespace ExcelChatAddin
             y += 40;
 
             // ボタン
-            var btnOk = new Button { Text = "保存", Location = new Point(300, y), Width = 90, DialogResult = DialogResult.OK };
+            var btnOk = new Button { Text = "保存", Location = new Point(300, y), Width = 90, Height = 28, DialogResult = DialogResult.OK };
             btnOk.Click += (s, e) => SaveSettings();
-            var btnCancel = new Button { Text = "キャンセル", Location = new Point(398, y), Width = 90, DialogResult = DialogResult.Cancel };
+            var btnCancel = new Button { Text = "キャンセル", Location = new Point(398, y), Width = 90, Height = 28, DialogResult = DialogResult.Cancel };
             Controls.Add(btnOk);
             Controls.Add(btnCancel);
             AcceptButton = btnOk;
             CancelButton = btnCancel;
+
+            // 中身に合わせてクライアント領域を確定（タイトルバー分を含めず確保し、ボタンの見切れを防ぐ）
+            ClientSize = new Size(500, y + btnOk.Height + 16);
 
             LoadSettings();
         }
