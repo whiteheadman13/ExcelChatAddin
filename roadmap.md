@@ -25,6 +25,7 @@
 | M-2 | 未着手 | 機能追加 | **意味ヒント送信（BuildMeaningHintBlock / AppendMeaningHintsForSend）** | マスク語の「意味」を機密を含めずに LLM へ渡し理解を助ける。設定で ON/OFF。Excel は未対応（v2 前提）。参照: `powerpoint_masking2/MaskingEngine.cs:389,508` |
 | M-3 | 未着手 | 機能追加 | **@トークン保護マスキング（MaskExcludingAtTokens 相当）** | Excel は `@range(...)` を独自処理しているが、PowerPoint 型の「@token を退避→マスク→復元」の汎用ガードは無い。@range 解決経路の取りこぼし確認と統一。参照: `powerpoint_masking2/MaskingEngine.cs:325`, `ExcelChatAddin/ChatView.xaml.cs:67,479` |
 | M-4 | ✅ 完了 | 機能追加 | **Unmask の大小文字非区別フォールバック** | M-1 の v2 化と同時に `Unmask()` へ大小文字非区別の再置換フォールバックを実装済み。参照: `OfficeMasking.Core/MaskingEngine.cs` |
+| M-5 | 未着手 | 機能追加 | **辞書登録UIの意味(meaning)入力・編集対応** | エイリアスは `RegisterDialog` の「既存タグに紐付け(表記揺れ)」で登録可（v2化で対応済み）。一方**意味(meaning)は入力欄が無く Excel から登録・編集できない**。`RegisterDialog` に意味入力欄、`DictionaryManager` に意味列（＋できれば有効/無効トグル・別名の明示表示）を追加する。PowerPoint 登録分の意味は保持済み。M-2（意味の送信）と併せて価値が出る。参照: `ExcelChatAddin/RegisterDialog.cs`, `DictionaryManager.cs`, `powerpoint_masking2/DictionaryManager.cs` |
 
 ## 優先度：低（LLM プロバイダ拡充）
 
