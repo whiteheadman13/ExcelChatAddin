@@ -115,10 +115,12 @@
                                 ToolTip="ローカルLLM選択中：マスキングせず生データを送信します">
                             <TextBlock Text="マスキングOFF" Foreground="White" FontSize="10" FontWeight="Bold"/>
                         </Border>
-                        <ComboBox x:Name="cmbModel" Width="140" SelectionChanged="CmbModel_SelectionChanged"/>
-                        <Button x:Name="btnRefreshModels" Content="⟳" Width="24" Height="22"
-                                Margin="2,0,0,0" Click="BtnRefreshModels_Click"
-                                ToolTip="ローカルLLMのモデル一覧を更新"/>
+                        <TextBlock x:Name="lblProviderModel" VerticalAlignment="Center"
+                                   FontSize="11" Margin="0,0,4,0"
+                                   ToolTip="現在のLLMプロバイダとモデル（設定で変更）"/>
+                        <Button x:Name="btnLlmSettings" Content="⚙ 設定" Height="22"
+                                Click="BtnLlmSettings_Click"
+                                ToolTip="LLMプロバイダ・モデルの設定"/>
                     </StackPanel>
                 </StackPanel>
 

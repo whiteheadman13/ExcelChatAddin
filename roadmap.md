@@ -32,8 +32,8 @@
 
 | # | 状態 | 種別 | 項目 | 内容・PowerPoint 側の参照 |
 |---|---|---|---|---|
-| L-1 | 🚧 進行中 | 機能追加 | **LLM プロバイダのルーター化（LlmClientRouter / LlmProvider 相当）** | 「パワポ式の明示切替」に寄せる方針で決定。**土台完了**: `LlmProvider` 定数・`AddinConfig` プロバイダ選択/各接続設定（PowerPoint 共有 PascalCase キー）。**残**: 設定ダイアログ（プロバイダ選択＋各URL/モデル）新設、`LlmClientRouter`（ローカル送信の Ollama/LMStudio/ClaudeCli 振り分け＋送信ガード一元化）、`ChatView` の送信UXを「選択モデルのグループ判定」から「明示プロバイダ判定」へ改修。参照: `powerpoint_masking2/LlmClientRouter.cs`, `LlmProvider.cs` |
-| L-2 | 🚧 進行中 | 機能追加 | **LM Studio 対応** | **土台完了**: `LmStudioProtocol`（Core・テスト12件）＋`LmStudioClient`（`OllamaClient` と同一シグネチャ）。**残**: L-1 のルーター/設定UIへ接続。参照: `powerpoint_masking2/LmStudioClient` |
+| L-1 | ✅ 完了 | 機能追加 | **LLM プロバイダのルーター化（LlmClientRouter / LlmProvider 相当）** | 「パワポ式の明示切替」で実装。`LlmProvider` 定数、`AddinConfig` プロバイダ選択/各接続設定（PowerPoint 共有 PascalCase キー）、`LlmSettingsDialog`（プロバイダ＋各URL/モデル選択・モデル取得）、`LlmClientRouter`（ローカル送信の Ollama/LMStudio 振り分け）。`ChatView` の送信UXを「モデルコンボのグループ判定」から**「⚙設定での明示プロバイダ判定」へ全面改修**（コンボ廃止・プロバイダ/モデルをヘッダー表示）。OFFバッジ・生データ混在ブロックはプロバイダ基準で維持。参照: `powerpoint_masking2/LlmClientRouter.cs`, `LlmProvider.cs` |
+| L-2 | ✅ 完了 | 機能追加 | **LM Studio 対応** | `LmStudioProtocol`（Core・テスト12件）＋`LmStudioClient`（`OllamaClient` と同一シグネチャ）。設定ダイアログでプロバイダに LM Studio を追加し、ルーターから送信。参照: `powerpoint_masking2/LmStudioClient` |
 | L-3 | 未着手 | 機能追加 | **Claude Code CLI 対応** | Excel は未対応。hook 設定・作業ディレクトリ隔離・セッション（--resume）・思考過程抽出含む（最も重い）。L-1 のルーター完成後に着手。参照: `powerpoint_masking2/ClaudeCliClient`, `ClaudeHookSettingsWriter.cs`, `Paths.cs:85,91` |
 
 ## 開発環境・運用

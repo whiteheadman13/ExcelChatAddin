@@ -21,29 +21,14 @@ namespace ExcelChatAddin
         private bool _requestTableForNextSend = false;
         private const int MaxVisibleChatLines = 10;
         private string _selectedModel = "gemini-3.1-flash-lite-preview";
+        // 選択中の LLM プロバイダ（明示切替・設定に一本化 / L-1）。
+        private string _selectedProvider = LlmProvider.Gemini;
         private string _lastGeminiResponse = "";
         private string _lastSentRawInput = "";
 
-        // 選択肢に出す Gemini モデル（静的）。
-        private static readonly string[] GeminiModels =
-        {
-            "gemini-3.1-flash-lite-preview",
-            "gemini-3-flash-preview",
-            "gemini-3.1-pro-preview",
-            "gemini-2.5-pro",
-        };
-        // ローカル(ollama)モデル名の集合。/api/tags から動的取得し、
-        // ここに含まれるモデルを選んだときは Local 経路（マスキングなし）で送信する。
-        private readonly HashSet<string> _localModels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // 現在の画面履歴に Local 由来（生データ）の吹き出しが含まれるか。
         // true の間は Gemini への送信をブロックする（生データの外部漏洩防止）。
         private bool _historyContainsLocal = false;
-        // モデルコンボの再構築中に SelectionChanged の副作用を抑止するフラグ。
-        private bool _suppressModelChange = false;
-
-        // 現在選択中のモデルが Local（ollama）か。
-        private bool IsLocalModel(string model)
-            => !string.IsNullOrEmpty(model) && _localModels.Contains(model);
 
         private TaskPaneHost _host;
         // 範囲の送信マッピング（セッション内で重複送信を避けるため）
@@ -556,7 +541,9 @@ namespace ExcelChatAddin
                 var raw = InputBox.Text ?? "";
                 if (string.IsNullOrWhiteSpace(raw)) return;
 
-                bool isLocal = IsLocalModel(_selectedModel);
+                // 送信直前に最新のプロバイダ選択を反映（設定ダイアログ外での変更にも追従）
+                LoadProviderSelection();
+                bool isLocal = IsLocalSelected();
 
                 // Local 由来（マスキングなし）の生データが履歴にある状態での Gemini 送信はブロック。
                 // 生データが無加工で外部に漏れるのを物理的に防ぐ（履歴クリアまで送信不可）。
@@ -642,14 +629,13 @@ namespace ExcelChatAddin
                 if (isLocal)
                 {
                     // ── ローカルLLM経路（マスキングなし・生データ送信） ──
-                    var baseUrl = AddinConfig.GetOllamaBaseUrl();
+                    // プロバイダ（Ollama / LM Studio）はルーターが config から判定して振り分ける。
                     bool allowMarkdown = payload.IndexOf("Markdown", StringComparison.OrdinalIgnoreCase) >= 0;
                     var sysInstr = BuildLocalSystemInstruction(allowMarkdown);
-                    var ollama = new OllamaClient();
 
-                    DebugLogger.LogInfo("Sending to local LLM (ollama)...");
-                    // 失敗時は OllamaClient が明確な例外を投げる（フォールバック無し）
-                    unmaskedResponse = await ollama.SendAsync(_selectedModel, payload, sysInstr, baseUrl);
+                    DebugLogger.LogInfo($"Sending to local LLM ({LlmClientRouter.ProviderDisplayName()})...");
+                    // 失敗時は各クライアントが明確な例外を投げる（フォールバック無し）
+                    unmaskedResponse = await LlmClientRouter.SendLocalAsync(payload, sysInstr);
                     _lastGeminiResponse = unmaskedResponse ?? "";
 
                     Dispatcher.Invoke(() =>
@@ -660,7 +646,7 @@ namespace ExcelChatAddin
 
                     // 検証ループ：ローカルはマスクせず素のプロンプト/応答を使う
                     sendForValidation = async prompt =>
-                        await ollama.SendAsync(_selectedModel, prompt, sysInstr, baseUrl);
+                        await LlmClientRouter.SendLocalAsync(prompt, sysInstr);
                 }
                 else
                 {
@@ -2052,108 +2038,46 @@ namespace ExcelChatAddin
             _requestTableForNextSend = false;
         }
 
-        // ── モデル選択（Gemini静的 ＋ ローカル動的） ──
+        // ── プロバイダ選択（明示切替・設定に一本化 / L-1） ──
 
-        // 起動時：config から前回モデルを復元し、Gemini のみで一旦構築 → 非同期で /api/tags を取得。
+        // 起動時：config から選択中プロバイダとモデルを解決し、表示へ反映する。
         private void InitModelCombo()
         {
-            var last = AddinConfig.GetLastModel();
-            if (!string.IsNullOrWhiteSpace(last)) _selectedModel = last;
-            RebuildModelCombo();
-            _ = RefreshModelListAsync();
+            LoadProviderSelection();
+            UpdateProviderDisplay();
         }
 
-        // /api/tags を叩いてローカルモデル一覧を更新し、コンボを再構築する。
-        private async Task RefreshModelListAsync()
+        // 選択中プロバイダとそのモデルを config から読み込む。
+        private void LoadProviderSelection()
+        {
+            _selectedProvider = AddinConfig.GetLlmProvider();
+            _selectedModel = LlmClientRouter.CurrentModel();
+        }
+
+        // 選択中プロバイダがローカル（マスキングなし・生データ送信）か。
+        private bool IsLocalSelected()
+            => LlmProvider.IsLocal(_selectedProvider);
+
+        // 設定ボタン: プロバイダ・モデル設定ダイアログを開き、確定後に表示を更新する。
+        private void BtnLlmSettings_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                var baseUrl = AddinConfig.GetOllamaBaseUrl();
-                var client = new OllamaClient();
-                var models = await client.GetModelsAsync(baseUrl);
-                Dispatcher.Invoke(() =>
+                System.Windows.Forms.IWin32Window owner = null;
+                if (_host != null && _host.ExcelHwnd != IntPtr.Zero)
+                    owner = new Win32Window(_host.ExcelHwnd);
+
+                using (var dlg = new LlmSettingsDialog())
                 {
-                    _localModels.Clear();
-                    foreach (var m in models) _localModels.Add(m);
-                    RebuildModelCombo();
-                });
-            }
-            catch (Exception ex)
-            {
-                DebugLogger.LogException(ex, "RefreshModelListAsync");
-            }
-        }
-
-        // コンボを Gemini グループ ＋（あれば）ローカルグループで作り直す。
-        private void RebuildModelCombo()
-        {
-            if (cmbModel == null) return;
-            _suppressModelChange = true;
-            try
-            {
-                cmbModel.Items.Clear();
-
-                cmbModel.Items.Add(MakeHeaderItem("── Gemini（マスキングあり） ──"));
-                foreach (var g in GeminiModels)
-                    cmbModel.Items.Add(MakeModelItem(g));
-
-                if (_localModels.Count > 0)
-                {
-                    cmbModel.Items.Add(new Separator());
-                    cmbModel.Items.Add(MakeHeaderItem("── ローカル（マスキングなし） ──"));
-                    foreach (var l in _localModels)
-                        cmbModel.Items.Add(MakeModelItem(l));
+                    var result = owner != null ? dlg.ShowDialog(owner) : dlg.ShowDialog();
+                    if (result != System.Windows.Forms.DialogResult.OK) return;
                 }
 
-                SelectModelInCombo(_selectedModel);
-            }
-            finally { _suppressModelChange = false; }
-            UpdateLocalIndicator();
-        }
+                LoadProviderSelection();
 
-        private static ComboBoxItem MakeModelItem(string name)
-            => new ComboBoxItem { Content = name, Tag = name };
-
-        // 選択不可のグループ見出し（Tag=null なので選んでも _selectedModel は変わらない）。
-        private static ComboBoxItem MakeHeaderItem(string text)
-            => new ComboBoxItem { Content = text, Tag = null, IsEnabled = false, FontWeight = FontWeights.Bold };
-
-        // 指定モデル名の項目を選択する。見つからなければ先頭の Gemini にフォールバック。
-        private void SelectModelInCombo(string model)
-        {
-            foreach (var obj in cmbModel.Items)
-            {
-                if (obj is ComboBoxItem ci && ci.Tag != null
-                    && string.Equals(ci.Tag.ToString(), model, StringComparison.Ordinal))
-                {
-                    cmbModel.SelectedItem = ci;
-                    return;
-                }
-            }
-            _selectedModel = GeminiModels[0];
-            foreach (var obj in cmbModel.Items)
-            {
-                if (obj is ComboBoxItem ci && ci.Tag != null
-                    && string.Equals(ci.Tag.ToString(), _selectedModel, StringComparison.Ordinal))
-                {
-                    cmbModel.SelectedItem = ci;
-                    return;
-                }
-            }
-        }
-
-        private void CmbModel_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_suppressModelChange) return;
-            try
-            {
-                var cb = cmbModel.SelectedItem as ComboBoxItem;
-                if (cb == null || cb.Tag == null) return;
-                var newModel = cb.Tag.ToString();
-
-                // Local 由来の生データが履歴にある状態で Gemini に切り替えようとしたら警告。
+                // Local 由来の生データが履歴にある状態で Gemini へ切り替えたら警告。
                 // （送信自体は btnSendGemini_Click 側でも履歴クリアまでブロックする）
-                if (_historyContainsLocal && !IsLocalModel(newModel))
+                if (_historyContainsLocal && !IsLocalSelected())
                 {
                     MessageBox.Show(
                         "チャット履歴にローカルLLM（マスキングなし）の生データが含まれています。\n" +
@@ -2163,16 +2087,25 @@ namespace ExcelChatAddin
                         MessageBoxButton.OK, MessageBoxImage.Warning);
                 }
 
-                _selectedModel = newModel;
-                AddinConfig.SetLastModel(_selectedModel);
-                UpdateLocalIndicator();
+                UpdateProviderDisplay();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.ToString(), "LLM設定");
+            }
         }
 
-        private void BtnRefreshModels_Click(object sender, RoutedEventArgs e)
+        // ヘッダーのプロバイダ/モデル表示と Local インジケータを更新する。
+        private void UpdateProviderDisplay()
         {
-            _ = RefreshModelListAsync();
+            if (lblProviderModel != null)
+            {
+                string model = _selectedModel;
+                lblProviderModel.Text = string.IsNullOrWhiteSpace(model)
+                    ? LlmClientRouter.ProviderDisplayName()
+                    : $"{LlmClientRouter.ProviderDisplayName()} / {model}";
+            }
+            UpdateLocalIndicator();
         }
 
         // ローカルLLM向けの system 指示。Gemini と異なりマスキング維持の指示は不要。
@@ -2189,7 +2122,7 @@ namespace ExcelChatAddin
         // Local 選択中は入力欄の枠を強調し「マスキングOFF」バッジを表示する。
         private void UpdateLocalIndicator()
         {
-            bool isLocal = IsLocalModel(_selectedModel);
+            bool isLocal = IsLocalSelected();
             if (LocalBadge != null)
                 LocalBadge.Visibility = isLocal ? Visibility.Visible : Visibility.Collapsed;
             if (InputBox != null)

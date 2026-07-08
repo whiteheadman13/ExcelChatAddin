@@ -21,7 +21,7 @@
 | `ExcelChatAddin/TaskPaneHost.cs` | カスタムタスクペインの WinForms ホスト。`ElementHost` で WPF `ChatView` を埋め込み、Excel セル操作のブリッジ |
 | `ExcelChatAddin/TaskPaneHost.Designer.cs` | `TaskPaneHost` 自動生成コード（編集不要） |
 | `ExcelChatAddin/ChatView.xaml` | チャット画面レイアウト（WPF） |
-| `ExcelChatAddin/ChatView.xaml.cs` | チャットUIの全制御。`@range`/`@table` トークン解析、送信ペイロード構築（マスキング有無を切替・スキーマ同梱・トークンを含む本文/履歴は `MaskExcludingAtTokens` で @トークン保護マスク・M-3）、Gemini/ローカルLLM への送信分岐、応答のシート反映、検証ループ呼び出し。モデル選択コンボ（Gemini静的＋ローカル動的）、Local由来履歴がある状態でのGemini送信ブロック、マスキングOFFバッジ表示 |
+| `ExcelChatAddin/ChatView.xaml.cs` | チャットUIの全制御。`@range`/`@table` トークン解析、送信ペイロード構築（マスキング有無を切替・スキーマ同梱・トークンを含む本文/履歴は `MaskExcludingAtTokens` で @トークン保護マスク・M-3）、Gemini/ローカルLLM への送信分岐（ローカルは `LlmClientRouter` 経由）、応答のシート反映、検証ループ呼び出し。**LLMプロバイダは「⚙ 設定」（`LlmSettingsDialog`）で明示選択**し、選択中プロバイダ/モデルをヘッダー表示（L-1）。Local由来履歴がある状態でのGemini送信ブロック、マスキングOFFバッジ表示 |
 
 ### AI連携
 
@@ -72,6 +72,8 @@
 | `ExcelChatAddin/Paths.cs` | 永続データ保存先の統一管理。共通パスは `MaskingPaths` へ委譲し、Excel固有パス（`table_schema.json` / `table_relations.json` / テンプレート等）を追加定義 |
 | `ExcelChatAddin/AddinConfig.cs` | `config.json` の読み書き。最後に選択したモデル（`lastModel`）、意味ヒント送信の ON/OFF（`MaskingMeaningHintEnabled`・既定 ON・M-2）に加え、**LLMプロバイダ選択と各プロバイダ接続設定**（`LlmProvider`/`GeminiModel`/`OllamaBaseUrl`/`OllamaModel`/`LmStudioBaseUrl`/`LmStudioModel`/`ClaudeCli*`）を PowerPoint と同じ PascalCase キーで共有（L-1）。Ollama URL は旧 camelCase を後方互換で読む。未知のキーは保持 |
 | `ExcelChatAddin/LlmProvider.cs` | LLMプロバイダ種別の定数（Gemini/Ollama/LmStudio/ClaudeCli）と判定ヘルパー。`IsLocal`（Ollama/LMStudio/ClaudeCli＝生データ送信）/`IsGemini`（外部送信・マスキング必須）を提供（L-1・powerpoint_masking2 パリティ） |
+| `ExcelChatAddin/LlmClientRouter.cs` | 選択中プロバイダ（`AddinConfig.GetLlmProvider`）に応じた送信先の振り分け（L-1）。`IsLocalSelected`/`CurrentModel`/`ProviderDisplayName` とローカル送信 `SendLocalAsync`（Ollama/LM Studio を振り分け・Claude CLI は未実装）。Gemini 送信は ChatView が GeminiClient で実施 |
+| `ExcelChatAddin/LlmSettingsDialog.cs` | LLMプロバイダ（Gemini/Ollama/LM Studio）と各接続設定（URL・モデル）を選ぶ設定ダイアログ（WinForms・L-1）。ローカルは「取得」でモデル一覧を取得。保存は `AddinConfig` 経由で `config.json`（PowerPoint 共有）へ。ChatView の「⚙ 設定」ボタンから開く |
 
 ### テンプレート
 

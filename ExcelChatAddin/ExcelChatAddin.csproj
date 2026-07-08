@@ -196,6 +196,8 @@
   <ItemGroup>
     <Compile Include="AddinConfig.cs" />
     <Compile Include="LlmProvider.cs" />
+    <Compile Include="LlmClientRouter.cs" />
+    <Compile Include="LlmSettingsDialog.cs" />
     <Compile Include="LmStudioClient.cs" />
     <Compile Include="ChatRibbon.cs" />
     <Compile Include="ColumnDetailDialog.cs">
