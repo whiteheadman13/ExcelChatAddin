@@ -1936,7 +1936,7 @@ namespace ExcelChatAddin
 
                     if (dlg.IsNewCategory)
                     {
-                        MaskingEngine.Instance.AddRule(selected, dlg.SelectedCategory, dlg.SelectedMeaning);
+                        MaskingEngine.Instance.AddRule(selected, dlg.SelectedCategory, dlg.Meaning, dlg.AliasList, dlg.CaseInsensitive);
 
                         // 追加されたプレースホルダを取り出す
                         var rules = MaskingEngine.Instance.GetAllRules();
@@ -1956,7 +1956,7 @@ namespace ExcelChatAddin
                             return;
                         }
 
-                        MaskingEngine.Instance.AddRuleWithPlaceholder(selected, placeholder, dlg.SelectedMeaning);
+                        MaskingEngine.Instance.AddRuleWithPlaceholder(selected, placeholder, dlg.Meaning);
                     }
 
                     // 選択文字列をプレースホルダに置換

@@ -86,7 +86,7 @@ namespace ExcelChatAddin
                     string placeholder;
                     if (dlg.IsNewCategory)
                     {
-                        MaskingEngine.Instance.AddRule(selected, dlg.SelectedCategory, dlg.SelectedMeaning);
+                        MaskingEngine.Instance.AddRule(selected, dlg.SelectedCategory, dlg.Meaning, dlg.AliasList, dlg.CaseInsensitive);
                         var rules = MaskingEngine.Instance.GetAllRules();
                         if (!rules.TryGetValue(selected, out placeholder) || string.IsNullOrWhiteSpace(placeholder))
                         {
@@ -103,7 +103,7 @@ namespace ExcelChatAddin
                             return;
                         }
 
-                        MaskingEngine.Instance.AddRuleWithPlaceholder(selected, placeholder, dlg.SelectedMeaning);
+                        MaskingEngine.Instance.AddRuleWithPlaceholder(selected, placeholder, dlg.Meaning);
                     }
 
                     ReplaceCurrentSelection(placeholder);

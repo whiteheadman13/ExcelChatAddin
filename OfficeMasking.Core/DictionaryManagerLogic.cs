@@ -14,12 +14,18 @@ namespace OfficeMasking.Core
 
         public static List<string> GetKeysToRemove(Dictionary<string, string> originalData, IEnumerable<string> gridKeys)
         {
+            return GetKeysToRemove(originalData.Keys, gridKeys);
+        }
+
+        /// <summary>グリッドに残っていない元キーの一覧を返す（エントリ辞書のキー集合を直接渡す版）。</summary>
+        public static List<string> GetKeysToRemove(IEnumerable<string> originalKeys, IEnumerable<string> gridKeys)
+        {
             var keySet = new HashSet<string>(gridKeys.Where(k => !string.IsNullOrWhiteSpace(k)));
             var keysToRemove = new List<string>();
 
-            foreach (string key in originalData.Keys)
+            foreach (string key in originalKeys)
             {
-                if (!keySet.Contains(key))
+                if (!string.IsNullOrWhiteSpace(key) && !keySet.Contains(key))
                 {
                     keysToRemove.Add(key);
                 }

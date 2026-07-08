@@ -25,6 +25,9 @@ namespace OfficeMasking.Core
 
         public bool IsAvailable => !_loadFailed;
 
+        /// <summary>辞書の読込に失敗しているか（<see cref="IsAvailable"/> の反転・呼び出し側の可読性用）。</summary>
+        public bool HasLoadError => _loadFailed;
+
         public string AvailabilityErrorMessage => _loadFailureMessage;
 
         /// <summary>ロガーを設定する。各アドインの起動時に呼び出す。</summary>
@@ -48,10 +51,18 @@ namespace OfficeMasking.Core
         // ── 登録 ──
 
         public void AddRule(string original, string category)
-            => AddRule(original, category, null);
+            => AddRule(original, category, null, null, false);
 
         /// <summary>意味（Meaning）付きでルールを追加する（M-5）。</summary>
         public void AddRule(string original, string category, string meaning)
+            => AddRule(original, category, meaning, null, false);
+
+        /// <summary>
+        /// 意味（Meaning）・エイリアス（表記ゆれ）・大小文字非区別を指定してルールを追加する
+        /// （powerpoint_masking2 の登録UIとのパリティ）。
+        /// エイリアスのうち代表表記と同じもの・重複・空白は除外する。
+        /// </summary>
+        public void AddRule(string original, string category, string meaning, List<string> aliases, bool caseInsensitive)
         {
             EnsureAvailableForWrite();
             if (string.IsNullOrWhiteSpace(original) || ContainsRule(original)) return;
@@ -73,9 +84,27 @@ namespace OfficeMasking.Core
                 Placeholder = placeholder,
                 Category = cleanCategory,
                 Meaning = NormalizeMeaning(meaning),
+                Aliases = NormalizeAliases(aliases, original),
+                CaseInsensitive = caseInsensitive,
                 Enabled = true,
             });
             SaveRules();
+        }
+
+        /// <summary>エイリアス一覧を正規化する（トリム・空白除外・代表表記と同一のものと重複を除外）。</summary>
+        private static List<string> NormalizeAliases(IEnumerable<string> aliases, string word)
+        {
+            var result = new List<string>();
+            if (aliases == null) return result;
+            foreach (var a in aliases)
+            {
+                var trimmed = a?.Trim();
+                if (string.IsNullOrEmpty(trimmed)) continue;
+                if (string.Equals(trimmed, word, StringComparison.Ordinal)) continue;
+                if (result.Contains(trimmed)) continue;
+                result.Add(trimmed);
+            }
+            return result;
         }
 
         public void AddRuleWithPlaceholder(string original, string placeholder)
@@ -358,9 +387,22 @@ namespace OfficeMasking.Core
             var found = new List<string>();
             if (!IsAvailable || string.IsNullOrEmpty(text)) return found;
 
-            foreach (var e in _entries)
+            return FindWordsIn(text, _entries);
+        }
+
+        /// <summary>
+        /// 指定したエントリ集合の登録単語（代表表記＋エイリアス）のうち、テキストに含まれるものを列挙する。
+        /// 辞書管理画面で「編集中（未保存）のエントリ集合」に対し意味欄への機密混入を検査する用途など、
+        /// シングルトンの現在状態ではなく任意のエントリ集合を対象にしたい場合に使う。無効エントリは対象外。
+        /// </summary>
+        public static List<string> FindWordsIn(string text, IEnumerable<MaskingRule> entries)
+        {
+            var found = new List<string>();
+            if (string.IsNullOrEmpty(text) || entries == null) return found;
+
+            foreach (var e in entries)
             {
-                if (!e.Enabled) continue;
+                if (e == null || !e.Enabled) continue;
                 var comparison = e.CaseInsensitive ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
                 foreach (var key in e.AllKeys())
                 {

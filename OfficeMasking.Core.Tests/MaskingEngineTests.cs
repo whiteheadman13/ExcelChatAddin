@@ -572,5 +572,69 @@ namespace OfficeMasking.Core.Tests
             Assert.IsTrue(File.Exists(rulesPath));
             Assert.AreEqual("__RESTORE_1__", rules["復元"]);
         }
+
+        // ── PowerPoint パリティ: 5引数 AddRule（意味＋エイリアス＋大小文字無視） ──
+
+        [TestMethod]
+        public void AddRule_WithAliasesAndCaseInsensitive_MasksAllForms()
+        {
+            MaskingEngine.Instance.AddRule(
+                "ABC商事", "会社",
+                meaning: "主要取引先",
+                aliases: new List<string> { "ABC", "ABC Corp" },
+                caseInsensitive: true);
+
+            var entry = MaskingEngine.Instance.GetAllEntries().Single();
+            Assert.AreEqual("__会社_1__", entry.Placeholder);
+            Assert.AreEqual("主要取引先", entry.Meaning);
+            Assert.IsTrue(entry.CaseInsensitive);
+            CollectionAssert.AreEquivalent(new[] { "ABC", "ABC Corp" }, entry.Aliases);
+
+            // 代表表記・エイリアスすべてが同じプレースホルダーへマスクされる
+            Assert.AreEqual("__会社_1__", MaskingEngine.Instance.Mask("ABC商事"));
+            Assert.AreEqual("__会社_1__", MaskingEngine.Instance.Mask("ABC"));
+            // 大小文字無視: 小文字表記もマッチする
+            Assert.AreEqual("__会社_1__", MaskingEngine.Instance.Mask("abc corp"));
+        }
+
+        [TestMethod]
+        public void AddRule_WithAliases_ExcludesDuplicatesAndSelf()
+        {
+            MaskingEngine.Instance.AddRule(
+                "ABC商事", "会社",
+                meaning: null,
+                aliases: new List<string> { "ABC商事", "ABC", "ABC", " " },
+                caseInsensitive: false);
+
+            var entry = MaskingEngine.Instance.GetAllEntries().Single();
+            // 代表表記と同じもの・重複・空白は除外される
+            CollectionAssert.AreEquivalent(new[] { "ABC" }, entry.Aliases);
+        }
+
+        [TestMethod]
+        public void FindWordsIn_DetectsWordsAndAliasesFromSuppliedEntries()
+        {
+            var entries = new List<MaskingRule>
+            {
+                new MaskingRule { Word = "山田太郎", Placeholder = "__人名_1__", Enabled = true,
+                    Aliases = new List<string> { "ヤマダ" } },
+                new MaskingRule { Word = "ABC", Placeholder = "__会社_1__", Enabled = true,
+                    CaseInsensitive = true },
+                new MaskingRule { Word = "無効語", Placeholder = "__X_1__", Enabled = false },
+            };
+
+            var hits = MaskingEngine.FindWordsIn("担当のヤマダは abc 社の無効語です", entries);
+
+            CollectionAssert.Contains(hits, "ヤマダ");   // エイリアスも検出
+            CollectionAssert.Contains(hits, "ABC");        // 大小文字無視で abc を検出
+            CollectionAssert.DoesNotContain(hits, "無効語"); // 無効エントリは検出しない
+        }
+
+        [TestMethod]
+        public void HasLoadError_FalseWhenAvailable()
+        {
+            Assert.IsFalse(MaskingEngine.Instance.HasLoadError);
+            Assert.AreEqual(MaskingEngine.Instance.IsAvailable, !MaskingEngine.Instance.HasLoadError);
+        }
     }
 }
