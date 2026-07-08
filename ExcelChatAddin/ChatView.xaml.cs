@@ -665,8 +665,9 @@ namespace ExcelChatAddin
                 else
                 {
                     // ── Gemini経路（マスキングあり） ──
-                    var masked = MaskingEngine.Instance.Mask(payload);
-                    // 今回は payload 自体は既に BuildMaskedPayload 内でマスク済みだが保険として再マスク。
+                    // payload は BuildMaskedPayload 内でマスク済みだが保険として再マスク。
+                    // payload には @range_ref(#Rn) 等のトークンが含まれるため、トークン保護版を使う（M-3）。
+                    var masked = MaskingEngine.Instance.MaskExcludingAtTokens(payload);
 
                     // M-2: マスク語の意味ヒントを付加（設定 ON のとき）。ヒント自体も再マスク済みで平文漏れなし。
                     if (AddinConfig.GetMaskingMeaningHintEnabled())
@@ -692,7 +693,8 @@ namespace ExcelChatAddin
                     // 検証ループ：Gemini はマスク→送信→アンマスク
                     sendForValidation = async prompt =>
                     {
-                        var m = MaskingEngine.Instance.Mask(prompt);
+                        // 検証プロンプトも @range_ref 等のトークンを含むためトークン保護版でマスク（M-3）
+                        var m = MaskingEngine.Instance.MaskExcludingAtTokens(prompt);
                         if (AddinConfig.GetMaskingMeaningHintEnabled())
                             m += MaskingEngine.Instance.BuildMeaningHintBlock(m);
                         var r = await client.SendAsync(m, _selectedModel);
@@ -1352,7 +1354,11 @@ namespace ExcelChatAddin
         private string BuildMaskedPayload(string rawInput, string rangeLabel, string rangeText, bool commitMapping = true, bool applyMask = true)
         {
             // applyMask=false（ローカルLLM）のときはマスキングせず生データを通す。
+            // M   … 一般テキスト・セルデータ用（@ を含む内容もマスク対象）
+            // MTok… @トークンを含む本文/履歴用。@range_ref(#Rn)/@range(...)/@table(...) を退避してから
+            //        マスクし復元する（M-3）。トークンが辞書語と部分一致して破損するのを防ぐ。
             string M(string s) => applyMask ? MaskingEngine.Instance.Mask(s ?? "") : (s ?? "");
+            string MTok(string s) => applyMask ? MaskingEngine.Instance.MaskExcludingAtTokens(s ?? "") : (s ?? "");
             var sb = new StringBuilder();
 
             // use working map so preview does not mutate persistent state
@@ -1503,7 +1509,7 @@ namespace ExcelChatAddin
                 }
             }
             sb.AppendLine("【チャット履歴（参考）】");
-            sb.AppendLine(string.IsNullOrWhiteSpace(historyWithRefs) ? "(なし)" : M(historyWithRefs));
+            sb.AppendLine(string.IsNullOrWhiteSpace(historyWithRefs) ? "(なし)" : MTok(historyWithRefs));
             sb.AppendLine();
 
             // 3) input body: replace inline ranges/tables with refs if mapped
@@ -1529,7 +1535,7 @@ namespace ExcelChatAddin
             }
 
             sb.AppendLine("【入力】");
-            sb.AppendLine(M(bodyWithRefs));
+            sb.AppendLine(MTok(bodyWithRefs));
             sb.AppendLine();
 
             // 4) target range: only include if it appears among referenced keys (i.e. present in chat history or input)

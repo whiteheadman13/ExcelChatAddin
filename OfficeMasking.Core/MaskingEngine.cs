@@ -346,6 +346,34 @@ namespace OfficeMasking.Core
             });
         }
 
+        /// <summary>
+        /// @トークン（@range_ref(#Rn) / @range(...) / @図形名 など）を保護したままマスキングを実行する（M-3）。
+        /// @[^\s]+ に該当するトークンは一時プレースホルダーに退避し、通常マスキング後に元の文字列へ復元する。
+        /// これにより、解決済み/未解決の参照トークンが辞書語と部分一致してマスクで破損するのを防ぐ。
+        /// 注意: セルデータのように「@」を含む一般テキスト（メールアドレス等）には使わず、
+        /// トークンを含む本文・履歴に対してのみ使うこと（データ内の @ はマスク対象のままにするため）。
+        /// </summary>
+        public string MaskExcludingAtTokens(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return input;
+
+            var atTokens = new Dictionary<string, string>(StringComparer.Ordinal);
+            int index = 0;
+            string protectedText = Regex.Replace(input, @"@[^\s]+", m =>
+            {
+                string placeholder = $"\x02ATTOKEN{index++}\x03";
+                atTokens[placeholder] = m.Value;
+                return placeholder;
+            });
+
+            string masked = Mask(protectedText);
+
+            foreach (var kv in atTokens)
+                masked = masked.Replace(kv.Key, kv.Value);
+
+            return masked;
+        }
+
         public string Unmask(string input)
         {
             if (!IsAvailable || string.IsNullOrEmpty(input) || _entries.Count == 0) return input;

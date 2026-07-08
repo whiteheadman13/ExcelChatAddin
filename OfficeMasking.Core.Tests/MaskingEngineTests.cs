@@ -636,5 +636,46 @@ namespace OfficeMasking.Core.Tests
             Assert.IsFalse(MaskingEngine.Instance.HasLoadError);
             Assert.AreEqual(MaskingEngine.Instance.IsAvailable, !MaskingEngine.Instance.HasLoadError);
         }
+
+        // ── M-3: @トークン保護マスキング（MaskExcludingAtTokens） ──
+
+        [TestMethod]
+        public void MaskExcludingAtTokens_MasksWordsButPreservesAtTokens()
+        {
+            MaskingEngine.Instance.AddRule("営業部", "部署");
+
+            // @range_ref(#R1) 内に登録語の一部が無くても、トークン全体は保護される
+            string input = "営業部の課題を @range_ref(#R1) で確認して";
+            string result = MaskingEngine.Instance.MaskExcludingAtTokens(input);
+
+            Assert.AreEqual("__部署_1__の課題を @range_ref(#R1) で確認して", result);
+        }
+
+        [TestMethod]
+        public void MaskExcludingAtTokens_ProtectsTokenThatContainsRegisteredWord()
+        {
+            // 解決できなかった @table トークンにマスク対象語が含まれていても破損させない
+            MaskingEngine.Instance.AddRule("営業部", "部署");
+
+            string input = "@table(\"営業部リスト\") を参照";
+            string result = MaskingEngine.Instance.MaskExcludingAtTokens(input);
+
+            // トークンはそのまま（内部の「営業部」もマスクされない）
+            Assert.AreEqual("@table(\"営業部リスト\") を参照", result);
+        }
+
+        [TestMethod]
+        public void MaskExcludingAtTokens_NullOrEmpty_ReturnsInput()
+        {
+            Assert.AreEqual("", MaskingEngine.Instance.MaskExcludingAtTokens(""));
+            Assert.IsNull(MaskingEngine.Instance.MaskExcludingAtTokens(null));
+        }
+
+        [TestMethod]
+        public void MaskExcludingAtTokens_MasksNormallyWhenNoAtTokens()
+        {
+            MaskingEngine.Instance.AddRule("営業部", "部署");
+            Assert.AreEqual("__部署_1__の会議", MaskingEngine.Instance.MaskExcludingAtTokens("営業部の会議"));
+        }
     }
 }

@@ -21,7 +21,7 @@
 | `ExcelChatAddin/TaskPaneHost.cs` | カスタムタスクペインの WinForms ホスト。`ElementHost` で WPF `ChatView` を埋め込み、Excel セル操作のブリッジ |
 | `ExcelChatAddin/TaskPaneHost.Designer.cs` | `TaskPaneHost` 自動生成コード（編集不要） |
 | `ExcelChatAddin/ChatView.xaml` | チャット画面レイアウト（WPF） |
-| `ExcelChatAddin/ChatView.xaml.cs` | チャットUIの全制御。`@range`/`@table` トークン解析、送信ペイロード構築（マスキング有無を切替・スキーマ同梱）、Gemini/ローカルLLM への送信分岐、応答のシート反映、検証ループ呼び出し。モデル選択コンボ（Gemini静的＋ローカル動的）、Local由来履歴がある状態でのGemini送信ブロック、マスキングOFFバッジ表示 |
+| `ExcelChatAddin/ChatView.xaml.cs` | チャットUIの全制御。`@range`/`@table` トークン解析、送信ペイロード構築（マスキング有無を切替・スキーマ同梱・トークンを含む本文/履歴は `MaskExcludingAtTokens` で @トークン保護マスク・M-3）、Gemini/ローカルLLM への送信分岐、応答のシート反映、検証ループ呼び出し。モデル選択コンボ（Gemini静的＋ローカル動的）、Local由来履歴がある状態でのGemini送信ブロック、マスキングOFFバッジ表示 |
 
 ### AI連携
 
@@ -97,7 +97,7 @@
 
 | ファイル | 役割 |
 |---|---|
-| `OfficeMasking.Core/MaskingEngine.cs` | マスキングのシングルトンエンジン（rules.json v2 対応・内部は `MaskingRule` エントリ保持）。エイリアス（表記ゆれ）・意味・有効フラグ・大小文字区別に対応。`Mask`/`Unmask`（プレースホルダーは代表表記へ復元・大小文字フォールバック）/`AddRule`/`AddRuleWithPlaceholder`/`GetAllEntries`/`OverrideEntries` を提供。互換の Dictionary API（`GetAllRules`/`OverrideRules`）は v2 メタデータ・無効エントリを保全して更新。意味の登録・編集は `AddRule`/`AddRuleWithPlaceholder`（meaning オーバーロード）・`UpdateMeanings`/`GetMeaningsByPlaceholder`（M-5）。エイリアス・大小文字非区別も指定する `AddRule`(5引数)、任意のエントリ集合に対する平文検出 `FindWordsIn`(static)、読込失敗フラグ `HasLoadError` を提供（登録UIパリティ）。送信時の文脈ヒントは `BuildMeaningHintBlock`（意味付き有効エントリのみ・生成後に再マスク・M-2）。ロード失敗時は `IsAvailable=false` で書き込み保護し `Mask` も例外停止（H-2）。送信前チェック `FindRegisteredWordsIn`（H-1）、AI変形検出 `FindUnresolvedPlaceholders`/`AppendUnresolvedPlaceholderWarning(ForDisplay)`（H-3） |
+| `OfficeMasking.Core/MaskingEngine.cs` | マスキングのシングルトンエンジン（rules.json v2 対応・内部は `MaskingRule` エントリ保持）。エイリアス（表記ゆれ）・意味・有効フラグ・大小文字区別に対応。`Mask`/`Unmask`（プレースホルダーは代表表記へ復元・大小文字フォールバック）/`AddRule`/`AddRuleWithPlaceholder`/`GetAllEntries`/`OverrideEntries` を提供。互換の Dictionary API（`GetAllRules`/`OverrideRules`）は v2 メタデータ・無効エントリを保全して更新。意味の登録・編集は `AddRule`/`AddRuleWithPlaceholder`（meaning オーバーロード）・`UpdateMeanings`/`GetMeaningsByPlaceholder`（M-5）。エイリアス・大小文字非区別も指定する `AddRule`(5引数)、任意のエントリ集合に対する平文検出 `FindWordsIn`(static)、読込失敗フラグ `HasLoadError` を提供（登録UIパリティ）。送信時の文脈ヒントは `BuildMeaningHintBlock`（意味付き有効エントリのみ・生成後に再マスク・M-2）。@トークン保護マスク `MaskExcludingAtTokens`（`@range_ref`/`@range`/`@table` 等を退避→マスク→復元・M-3）。ロード失敗時は `IsAvailable=false` で書き込み保護し `Mask` も例外停止（H-2）。送信前チェック `FindRegisteredWordsIn`（H-1）、AI変形検出 `FindUnresolvedPlaceholders`/`AppendUnresolvedPlaceholderWarning(ForDisplay)`（H-3） |
 | `OfficeMasking.Core/MaskingSendGuard.cs` | 外部LLM送信直前の最終セーフティネット（H-1）。ペイロードに辞書登録語が平文で残っていれば `ConfirmSendDespiteLeaks`（アプリ側の警告ダイアログ）で確認し、中止時は `OperationCanceledException` を投げる。確認関数未設定時は安全側で中止 |
 | `OfficeMasking.Core/MaskingRule.cs` | rules.json v2 のデータモデル（`MaskingRule`：word/placeholder/category/meaning/aliases/caseInsensitive/enabled）と読み書きロジック（`MaskingRuleFile`：v2解析・v1→v2移行・シリアライズ・カテゴリ抽出）。powerpoint_masking2 と同一スキーマ（データ共有のため互換必須） |
 | `OfficeMasking.Core/MaskingRulesStore.cs` | `rules.json`（v2形式）の読み書き（`LoadEntries`/`SaveEntries`）と50世代バックアップローテーション。v1は読込時にv2へ移行。保存は必ずv2で行い共有相手の情報を失わない |
@@ -115,7 +115,7 @@ MSTest テストプロジェクト。`OfficeMasking.Core` のみを対象とす�
 
 | ファイル | 役割 |
 |---|---|
-| `OfficeMasking.Core.Tests/MaskingEngineTests.cs` | `MaskingEngine` の単体テスト（Mask/Unmask/AddRule/ロード失敗保護/H-2 Mask停止/H-1 FindRegisteredWordsIn/H-3 未復元プレースホルダー検出/M-5 意味の登録・更新・取得/M-2 意味ヒント生成と再マスク等） |
+| `OfficeMasking.Core.Tests/MaskingEngineTests.cs` | `MaskingEngine` の単体テスト（Mask/Unmask/AddRule/ロード失敗保護/H-2 Mask停止/H-1 FindRegisteredWordsIn/H-3 未復元プレースホルダー検出/M-5 意味の登録・更新・取得/M-2 意味ヒント生成と再マスク/M-3 @トークン保護マスク等） |
 | `OfficeMasking.Core.Tests/MaskingSendGuardTests.cs` | `MaskingSendGuard` の単体テスト（平文残存の検出・確認関数の続行/中止・未設定時のフェイルセーフ中止・複数パート走査/重複排除）（H-1） |
 | `OfficeMasking.Core.Tests/MaskingRulesStoreTests.cs` | `MaskingRulesStore` の単体テスト（LoadEntries/SaveEntries・v1→v2移行・v2形式保存・50世代バックアップ/復元/旧[..]形式エラー） |
 | `OfficeMasking.Core.Tests/MaskingPathsTests.cs` | `MaskingPaths` の単体テスト（DataDir解決/IsDataDirEnvironmentConfigured等） |
