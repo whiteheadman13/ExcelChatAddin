@@ -31,6 +31,7 @@
 | `ExcelChatAddin/GeminiDtos.cs` | Gemini API リクエスト/レスポンス用 DTO |
 | `ExcelChatAddin/GeminiResponseWindow.xaml.cs` | Gemini 応答のポップアップ表示ウィンドウ（WPF） |
 | `ExcelChatAddin/OllamaClient.cs` | ローカルLLM（ollama）への HTTP 通信ラッパ。`/api/tags` でモデル一覧取得、`/api/chat` で送信。接続不可/モデル未pull/タイムアウト時はフォールバックせず明確な例外を投げる。パース/URL組み立ては `OllamaProtocol` に委譲 |
+| `ExcelChatAddin/LmStudioClient.cs` | LM Studio（OpenAI 互換 API）への HTTP 通信ラッパ（L-2）。`/v1/models` でモデル一覧取得、`/v1/chat/completions` で送信。`OllamaClient` と同一シグネチャ（`GetModelsAsync`/`SendAsync`）でルーターから差し替え可。パース/URL組み立ては `LmStudioProtocol` に委譲 |
 | `ExcelChatAddin/ContentValidator.cs` | LLM 生成 JSON の定義準拠バリデーション。検証プロンプト構築・ループ制御（最大3回）・date型誤指摘フィルタ |
 
 ### マスキング
@@ -107,6 +108,7 @@
 | `OfficeMasking.Core/IMaskingLogger.cs` | ログ出力インターフェース定義 |
 | `OfficeMasking.Core/NullMaskingLogger.cs` | Null オブジェクトパターンの `IMaskingLogger` 実装（テスト・デフォルト用） |
 | `OfficeMasking.Core/OllamaProtocol.cs` | ローカルLLM（ollama）API の純粋ロジック。URL正規化、`/api/tags` のモデル一覧パース、`/api/chat` リクエスト生成・レスポンスパース。HTTP通信を持たず単体テスト可能 |
+| `OfficeMasking.Core/LmStudioProtocol.cs` | LM Studio（OpenAI 互換 API）の純粋ロジック（L-2）。`ResolveV1Root`（/v1 補完）、`/v1/models` パース、`/v1/chat/completions` リクエスト生成・レスポンスパース（error/空choices対応）。HTTP通信を持たず単体テスト可能 |
 
 ---
 
@@ -122,3 +124,4 @@ MSTest テストプロジェクト。`OfficeMasking.Core` のみを対象とす�
 | `OfficeMasking.Core.Tests/MaskingPathsTests.cs` | `MaskingPaths` の単体テスト（DataDir解決/IsDataDirEnvironmentConfigured等） |
 | `OfficeMasking.Core.Tests/DictionaryManagerLogicTests.cs` | `DictionaryManagerLogic` の単体テスト（バリデーション/プレースホルダー生成/削除候補抽出等） |
 | `OfficeMasking.Core.Tests/OllamaProtocolTests.cs` | `OllamaProtocol` の単体テスト（URL正規化/モデル一覧パース/チャットリクエスト生成/レスポンスパース） |
+| `OfficeMasking.Core.Tests/LmStudioProtocolTests.cs` | `LmStudioProtocol` の単体テスト（`/v1` 補完/URL組み立て/モデル一覧パース/リクエスト生成/レスポンス・エラーパース）（L-2） |

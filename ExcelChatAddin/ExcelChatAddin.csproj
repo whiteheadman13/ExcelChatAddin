@@ -196,6 +196,7 @@
   <ItemGroup>
     <Compile Include="AddinConfig.cs" />
     <Compile Include="LlmProvider.cs" />
+    <Compile Include="LmStudioClient.cs" />
     <Compile Include="ChatRibbon.cs" />
     <Compile Include="ColumnDetailDialog.cs">
       <SubType>Form</SubType>
