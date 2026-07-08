@@ -69,7 +69,8 @@
 | ファイル | 役割 |
 |---|---|
 | `ExcelChatAddin/Paths.cs` | 永続データ保存先の統一管理。共通パスは `MaskingPaths` へ委譲し、Excel固有パス（`table_schema.json` / `table_relations.json` / テンプレート等）を追加定義 |
-| `ExcelChatAddin/AddinConfig.cs` | `config.json` の読み書き。ローカルLLM のエンドポイント（`ollamaBaseUrl`）と最後に選択したモデル（`lastModel`）、意味ヒント送信の ON/OFF（`MaskingMeaningHintEnabled`・既定 ON・M-2）を永続化。未知のキーは保持 |
+| `ExcelChatAddin/AddinConfig.cs` | `config.json` の読み書き。最後に選択したモデル（`lastModel`）、意味ヒント送信の ON/OFF（`MaskingMeaningHintEnabled`・既定 ON・M-2）に加え、**LLMプロバイダ選択と各プロバイダ接続設定**（`LlmProvider`/`GeminiModel`/`OllamaBaseUrl`/`OllamaModel`/`LmStudioBaseUrl`/`LmStudioModel`/`ClaudeCli*`）を PowerPoint と同じ PascalCase キーで共有（L-1）。Ollama URL は旧 camelCase を後方互換で読む。未知のキーは保持 |
+| `ExcelChatAddin/LlmProvider.cs` | LLMプロバイダ種別の定数（Gemini/Ollama/LmStudio/ClaudeCli）と判定ヘルパー。`IsLocal`（Ollama/LMStudio/ClaudeCli＝生データ送信）/`IsGemini`（外部送信・マスキング必須）を提供（L-1・powerpoint_masking2 パリティ） |
 
 ### テンプレート
 
